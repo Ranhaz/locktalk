@@ -44,7 +44,7 @@ fun Greeting(name: String, modifier: Modifier = Modifier) {
 
 @Composable
 fun RegisterScreen(userRepository: UserRepository) {
-    var email by remember { mutableStateOf(TextFieldValue("")) }
+    var username by remember { mutableStateOf(TextFieldValue("")) }
     var password by remember { mutableStateOf(TextFieldValue("")) }
     val context = LocalContext.current
 
@@ -55,9 +55,9 @@ fun RegisterScreen(userRepository: UserRepository) {
         verticalArrangement = Arrangement.Center
     ) {
         OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Email") },
+            value = username,
+            onValueChange = { username = it },
+            label = { Text("Username") },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -70,7 +70,7 @@ fun RegisterScreen(userRepository: UserRepository) {
         Spacer(modifier = Modifier.height(16.dp))
         Button(
             onClick = {
-                userRepository.registerUser(email.text, password.text) { success ->
+                userRepository.registerUser(username.text, password.text) { success ->
                     if (success) {
                         Toast.makeText(
                             context, "User Registered!", Toast.LENGTH_SHORT
