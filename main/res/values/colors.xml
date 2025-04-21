@@ -1,0 +1,22 @@
+<resources>
+    <!-- צבעים בסיסיים -->
+    <color name="colorPrimary">#6200EE</color>
+    <color name="colorPrimaryDark">#3700B3</color>
+    <color name="colorAccent">#03DAC5</color>
+
+    <!-- צבעים עבור הרקע של האוברליי וההודעות -->
+    <color name="overlayBackgroundColor">#80000000</color> <!-- צבע כהה מעט שקוף לאוברליי -->
+    <color name="overlayTextColor">#FFFFFF</color> <!-- טקסט בהיר לאוברליי -->
+
+    <!-- צבעים עבור ההודעות המוצפנות -->
+    <color name="encryptedMessageBackgroundColor">#FF9800</color> <!-- רקע צהוב עבור הודעה מוצפנת -->
+    <color name="encryptedMessageTextColor">#FFFFFF</color> <!-- טקסט לבן עבור הודעה מוצפנת -->
+
+    <!-- צבעים עבור הודעות מפוענחות -->
+    <color name="decryptedMessageBackgroundColor">#4CAF50</color> <!-- רקע ירוק עבור הודעה מפוענחת -->
+    <color name="decryptedMessageTextColor">#000000</color> <!-- טקסט שחור עבור הודעה מפוענחת -->
+
+    <!-- צבעים עבור דיאלוגים, כולל PIN -->
+    <color name="pinDialogBackground">#FFFFFF</color> <!-- רקע לבן לדיאלוג ה-PIN -->
+    <color name="pinDialogTextColor">#000000</color> <!-- טקסט שחור בדיאלוג ה-PIN -->
+</resources>

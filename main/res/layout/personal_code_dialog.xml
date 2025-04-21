@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="הזן קוד אישי לפענוח ההודעה"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView
+        android:id="@+id/encryptedMessageText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ההודעה המוצפנת תופיע כאן"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:background="#F0F0F0"
+        android:padding="8dp"
+        android:minLines="3"
+        android:layout_marginBottom="16dp"/>
+
+    <EditText
+        android:id="@+id/personalCodeDialogInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="הכנס קוד אישי (4 ספרות)"
+        android:maxLength="4"
+        android:inputType="numberPassword"
+        android:gravity="center"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView
+        android:id="@+id/decryptedMessageText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:visibility="gone"
+        android:background="#E8F5E9"
+        android:padding="8dp"
+        android:minLines="2"
+        android:layout_marginBottom="16dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/personalCodeConfirmButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="פענח"
+            android:layout_marginEnd="8dp"/>
+
+        <Button
+            android:id="@+id/personalCodeCancelButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="סגור"/>
+
+    </LinearLayout>
+</LinearLayout>
