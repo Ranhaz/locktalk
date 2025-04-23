@@ -57,7 +57,9 @@ public class MyAccessibilityService extends AccessibilityService {
             "com.whatsapp.w4b",   // WhatsApp עסקי
             "com.gbwhatsapp",     // GB WhatsApp
             "com.whatsapp.plus",  // WhatsApp Plus
-            "com.yowhatsapp"      // YoWhatsApp
+            "com.yowhatsapp",     // YoWhatsApp
+            "com.whatsapp.android", // Alternative package name
+            "com.whatsapp.messenger" // Another common package name
     );
 
     @Override
@@ -69,11 +71,70 @@ public class MyAccessibilityService extends AccessibilityService {
             overlayManager = new OverlayManager(this, (WindowManager) getSystemService(WINDOW_SERVICE));
             Log.d(TAG, "Service created successfully");
 
+            // Check for installed WhatsApp
+            checkInstalledWhatsApp();
+
             checkOverlayPermission();
         } catch (Exception e) {
             Log.e(TAG, "Error in onCreate: ", e);
             showToast("שגיאה באתחול השירות: " + e.getMessage());
         }
+    }
+
+    private void checkInstalledWhatsApp() {
+        try {
+            List<String> installedPackages = getInstalledPackages();
+            boolean whatsappFound = false;
+            String installedWhatsAppPackage = null;
+
+            Log.d(TAG, "Checking installed packages for WhatsApp...");
+            for (String packageName : installedPackages) {
+                if (WhatsAppUtils.isWhatsAppPackage(packageName)) {
+                    whatsappFound = true;
+                    installedWhatsAppPackage = packageName;
+                    Log.d(TAG, "Found installed WhatsApp package: " + packageName);
+                    break;
+                }
+            }
+
+            if (!whatsappFound) {
+                Log.d(TAG, "WhatsApp not found on device");
+                mainHandler.post(() -> {
+                    showToast("WhatsApp לא נמצא במכשיר. אנא התקן את WhatsApp מהחנות");
+                    Intent intent = new Intent(Intent.ACTION_VIEW);
+                    intent.setData(Uri.parse("market://details?id=com.whatsapp"));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                });
+            } else {
+                Log.d(TAG, "Using WhatsApp package: " + installedWhatsAppPackage);
+                // Update the package list to prioritize the installed version
+                whatsappPackages.clear();
+                whatsappPackages.add(installedWhatsAppPackage);
+                whatsappPackages.addAll(Arrays.asList(
+                    "com.whatsapp",
+                    "com.whatsapp.w4b",
+                    "com.gbwhatsapp",
+                    "com.whatsapp.plus",
+                    "com.yowhatsapp"
+                ));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking installed WhatsApp: ", e);
+        }
+    }
+
+    private List<String> getInstalledPackages() {
+        List<String> packages = new ArrayList<>();
+        try {
+            List<android.content.pm.PackageInfo> installedPackages = getPackageManager().getInstalledPackages(0);
+            for (android.content.pm.PackageInfo packageInfo : installedPackages) {
+                packages.add(packageInfo.packageName);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting installed packages: ", e);
+        }
+        return packages;
     }
 
     private void checkOverlayPermission() {
@@ -95,14 +156,24 @@ public class MyAccessibilityService extends AccessibilityService {
                 return;
             }
 
-            // נבדוק אם האירוע מגיע מאחת מגרסאות WhatsApp המוכרות
             String packageName = event.getPackageName().toString();
-            if (!isWhatsAppPackage(packageName)) {
+            Log.d(TAG, "Received event from package: " + packageName);
+
+            // Enhanced WhatsApp package detection
+            if (!WhatsAppUtils.isWhatsAppPackage(packageName)) {
+                // If not WhatsApp, hide overlay if it's shown
+                if (overlayManager.isShown()) {
+                    Log.d(TAG, "Hiding overlay for non-WhatsApp package");
+                    overlayManager.hide();
+                }
                 return;
             }
 
+            // Log the detected WhatsApp package
+            Log.d(TAG, "Detected WhatsApp package: " + packageName);
+
             int eventType = event.getEventType();
-            Log.d(TAG, "Received event from WhatsApp: " + eventType + " (package: " + packageName + ")");
+            Log.d(TAG, "Received WhatsApp event: " + eventType + " (package: " + packageName + ")");
 
             // Check if we need to throttle events
             long currentTime = System.currentTimeMillis();
@@ -116,18 +187,22 @@ public class MyAccessibilityService extends AccessibilityService {
                 return;
             }
 
-            // Improved selection detection with better categorization
+            // Enhanced selection detection
             if (currentTime - lastSelectionCheckTime > SELECTION_CHECK_INTERVAL) {
                 lastSelectionCheckTime = currentTime;
 
                 // These are events that indicate user selection or interaction
                 boolean isSelectionEvent = (
                         eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
-                                eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
-                                eventType == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ||
-                                eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED ||
-                                eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ||
-                                eventType == AccessibilityEvent.TYPE_VIEW_CONTEXT_CLICKED
+                        eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
+                        eventType == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ||
+                        eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED ||
+                        eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ||
+                        eventType == AccessibilityEvent.TYPE_VIEW_CONTEXT_CLICKED ||
+                        eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                        eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+                        eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED ||
+                        eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
                 );
 
                 if (isSelectionEvent) {
@@ -143,25 +218,25 @@ public class MyAccessibilityService extends AccessibilityService {
             }
 
             try {
-                handleWhatsAppState(rootNode);
+                // Enhanced WhatsApp state detection
+                boolean isChatWindow = WhatsAppUtils.isInWhatsAppChat(rootNode);
+                Log.d(TAG, "Is in WhatsApp chat: " + isChatWindow);
+
+                if (isChatWindow) {
+                    if (!overlayManager.isShown()) {
+                        Log.d(TAG, "In WhatsApp chat window, showing overlay buttons");
+                        showEncryptAndDecryptButtons();
+                    }
+                } else if (overlayManager.isShown()) {
+                    Log.d(TAG, "Not in WhatsApp chat window, hiding overlay buttons");
+                    overlayManager.hide();
+                }
             } finally {
                 rootNode.recycle();
             }
         } catch (Exception e) {
             Log.e(TAG, "Error in onAccessibilityEvent: ", e);
         }
-    }
-
-    // בדיקה אם החבילה היא אחת מגרסאות WhatsApp
-    private boolean isWhatsAppPackage(String packageName) {
-        if (packageName == null) return false;
-
-        for (String whatsappPackage : whatsappPackages) {
-            if (packageName.equals(whatsappPackage)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     // New method to capture selected text
@@ -430,11 +505,16 @@ public class MyAccessibilityService extends AccessibilityService {
             setServiceInfo(info);
             checkOverlayPermission();
 
+            // Initial check for WhatsApp after a short delay
             new Handler().postDelayed(() -> {
                 AccessibilityNodeInfo rootNode = getRootInActiveWindow();
                 if (rootNode != null) {
                     try {
-                        handleWhatsAppState(rootNode);
+                        boolean isChatWindow = WhatsAppUtils.isInWhatsAppChat(rootNode);
+                        Log.d(TAG, "Initial WhatsApp check - Is in chat: " + isChatWindow);
+                        if (isChatWindow) {
+                            showEncryptAndDecryptButtons();
+                        }
                     } finally {
                         rootNode.recycle();
                     }

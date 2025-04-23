@@ -19,7 +19,11 @@ public class WhatsAppUtils {
             "com.yowhatsapp",     // YoWhatsApp
             "com.fmwhatsapp",     // FM WhatsApp
             "io.fouad.whatsapp",  // גרסאות חלופיות
-            "com.whatsapp.gold"   // WhatsApp Gold
+            "com.whatsapp.gold",  // WhatsApp Gold
+            "com.whatsapp.android", // Alternative package name
+            "com.whatsapp.messenger", // Another common package name
+            "com.whatsapp.wa",    // Another variant
+            "com.whatsapp.web"    // WhatsApp Web
     );
 
     // בדיקה אם חבילה היא אחת מגרסאות WhatsApp
@@ -28,10 +32,22 @@ public class WhatsAppUtils {
 
         // בדיקה מדויקת אם החבילה נמצאת ברשימה
         for (String whatsappPackage : WHATSAPP_PACKAGES) {
-            if (packageName.equals(whatsappPackage) || packageName.contains("whatsapp")) {
+            if (packageName.equals(whatsappPackage)) {
+                Log.d(TAG, "Exact WhatsApp package match found: " + packageName);
                 return true;
             }
         }
+
+        // בדיקה חלקית אם החבילה מכילה מילות מפתח של WhatsApp
+        if (packageName.contains("whatsapp") || 
+            packageName.contains("wa") || 
+            packageName.contains("w4b") ||
+            packageName.contains("gbwhatsapp") ||
+            packageName.contains("whatsappplus")) {
+            Log.d(TAG, "Partial WhatsApp package match found: " + packageName);
+            return true;
+        }
+
         return false;
     }
 
@@ -66,6 +82,10 @@ public class WhatsAppUtils {
     }
 
     public static boolean isInWhatsAppChat(AccessibilityNodeInfo rootNode) {
+        if (rootNode == null) return false;
+
+        Log.d(TAG, "Checking if in WhatsApp chat window");
+
         // בדיקה עבור כפתורי שליחה וצ'אט בכל גרסאות WhatsApp הידועות
         List<String> chatElementIds = Arrays.asList(
                 // WhatsApp רגיל
@@ -73,58 +93,74 @@ public class WhatsAppUtils {
                 "com.whatsapp:id/voice_note_btn",
                 "com.whatsapp:id/attach_camera_button",
                 "com.whatsapp:id/conversation_contact_name",
+                "com.whatsapp:id/entry",
+                "com.whatsapp:id/message_text",
 
                 // WhatsApp עסקי
                 "com.whatsapp.w4b:id/send",
                 "com.whatsapp.w4b:id/voice_note_btn",
                 "com.whatsapp.w4b:id/attach_camera_button",
                 "com.whatsapp.w4b:id/conversation_contact_name",
+                "com.whatsapp.w4b:id/entry",
+                "com.whatsapp.w4b:id/message_text",
 
                 // GB WhatsApp
                 "com.gbwhatsapp:id/send",
                 "com.gbwhatsapp:id/voice_note_btn",
                 "com.gbwhatsapp:id/attach_camera_button",
                 "com.gbwhatsapp:id/conversation_contact_name",
+                "com.gbwhatsapp:id/entry",
+                "com.gbwhatsapp:id/message_text",
 
                 // WhatsApp Plus
                 "com.whatsapp.plus:id/send",
                 "com.whatsapp.plus:id/voice_note_btn",
                 "com.whatsapp.plus:id/attach_camera_button",
                 "com.whatsapp.plus:id/conversation_contact_name",
+                "com.whatsapp.plus:id/entry",
+                "com.whatsapp.plus:id/message_text",
 
                 // YoWhatsApp
                 "com.yowhatsapp:id/send",
                 "com.yowhatsapp:id/voice_note_btn",
                 "com.yowhatsapp:id/attach_camera_button",
-                "com.yowhatsapp:id/conversation_contact_name"
+                "com.yowhatsapp:id/conversation_contact_name",
+                "com.yowhatsapp:id/entry",
+                "com.yowhatsapp:id/message_text"
         );
 
         // בדיקה אם אחד מהאלמנטים נמצא
         for (String elementId : chatElementIds) {
             List<AccessibilityNodeInfo> nodes = rootNode.findAccessibilityNodeInfosByViewId(elementId);
             if (nodes != null && !nodes.isEmpty()) {
+                Log.d(TAG, "Found WhatsApp chat element: " + elementId);
                 return true;
             }
         }
 
         // בדיקות נוספות בהתבסס על מבנה המסך
-        // בדיקה אם יש קלט טקסט ברקע
-        if (findEditTextContent(rootNode) != null) {
-            // חיפוש אלמנטים נפוצים בממשק צ'אט
-            List<AccessibilityNodeInfo> textViews = findNodesByClassName(rootNode, "android.widget.TextView");
-            for (AccessibilityNodeInfo textView : textViews) {
-                CharSequence text = textView.getText();
-                if (text != null) {
-                    // חיפוש טקסט מאפיין לממשק צ'אט
-                    String textContent = text.toString().toLowerCase();
-                    if (textContent.contains("הקלד הודעה") ||
-                            textContent.contains("type a message") ||
-                            textContent.contains("message") ||
-                            textContent.contains("הודעה")) {
-                        return true;
-                    }
+        List<AccessibilityNodeInfo> textViews = findNodesByClassName(rootNode, "android.widget.TextView");
+        for (AccessibilityNodeInfo textView : textViews) {
+            CharSequence text = textView.getText();
+            if (text != null) {
+                String textContent = text.toString().toLowerCase();
+                if (textContent.contains("הקלד הודעה") ||
+                    textContent.contains("type a message") ||
+                    textContent.contains("message") ||
+                    textContent.contains("הודעה") ||
+                    textContent.contains("chat") ||
+                    textContent.contains("צ'אט")) {
+                    Log.d(TAG, "Found WhatsApp chat indicator text: " + textContent);
+                    return true;
                 }
             }
+        }
+
+        // בדיקה אם יש קלט טקסט
+        String inputText = findEditTextContent(rootNode);
+        if (inputText != null) {
+            Log.d(TAG, "Found input text in WhatsApp chat");
+            return true;
         }
 
         return false;

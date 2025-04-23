@@ -4,6 +4,7 @@ import android.content.ComponentName;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
@@ -116,54 +117,22 @@ public class EncryptionActivity extends AppCompatActivity {
     private void openWhatsApp() {
         Log.d(TAG, "Opening WhatsApp with improved detection");
 
-        // Use both WhatsApp package detection methods and direct intent to improve success rate
-        boolean whatsAppFound = false;
-
-        // Method 1: Check if WhatsApp is installed via package manager query
+        // First check if WhatsApp is installed
         if (isWhatsAppInstalled()) {
-            whatsAppFound = true;
-            boolean success = tryOpenWhatsApp();
-
-            if (!success) {
-                // Fallback to direct Play Store intent if we couldn't open WhatsApp
-                openWhatsAppPlayStore();
-            }
-        } else {
-            // Method 2: Try direct intent to open WhatsApp
-            try {
-                Intent whatsappIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com"));
-                if (whatsappIntent.resolveActivity(getPackageManager()) != null) {
-                    startActivity(whatsappIntent);
-                    whatsAppFound = true;
-                } else {
-                    Log.d(TAG, "WhatsApp intent could not be resolved");
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error with direct WhatsApp intent: " + e.getMessage());
-            }
-
-            // If both methods failed, show dialog
-            if (!whatsAppFound) {
-                showWhatsAppNotFoundDialog();
+            // If installed, try to open it
+            if (tryOpenWhatsApp()) {
+                return;
             }
         }
-    }
 
-    private void openWhatsAppPlayStore() {
-        try {
-            Log.d(TAG, "Opening WhatsApp on Play Store");
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setData(Uri.parse("market://details?id=com.whatsapp"));
-            startActivity(intent);
-        } catch (Exception e) {
-            // If Play Store not available, open browser
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setData(Uri.parse("https://play.google.com/store/apps/details?id=com.whatsapp"));
-            startActivity(intent);
-        }
+        // If not installed or can't open, show dialog
+        showWhatsAppNotFoundDialog();
     }
 
     private boolean isWhatsAppInstalled() {
+        PackageManager pm = getPackageManager();
+        
+        // Method 1: Check for specific package names
         String[] packages = {
                 "com.whatsapp",          // Regular WhatsApp
                 "com.whatsapp.w4b",      // WhatsApp Business
@@ -175,77 +144,64 @@ public class EncryptionActivity extends AppCompatActivity {
                 "com.whatsapp.gold"      // WhatsApp Gold
         };
 
-        PackageManager pm = getPackageManager();
-
-        // First check with isPackageInstalled method
         for (String packageName : packages) {
             try {
                 pm.getPackageInfo(packageName, PackageManager.GET_ACTIVITIES);
-                Log.d(TAG, "WhatsApp package found using getPackageInfo: " + packageName);
+                Log.d(TAG, "WhatsApp package found: " + packageName);
                 return true;
             } catch (PackageManager.NameNotFoundException e) {
-                // Package not found, continue to next
                 Log.d(TAG, "Package not found: " + packageName);
             }
         }
 
-        // Second check - look for WhatsApp intent handling ability
-        Intent whatsappIntent = new Intent(Intent.ACTION_SEND);
-        whatsappIntent.setType("text/plain");
-        List<ResolveInfo> whatsappInfoList = pm.queryIntentActivities(whatsappIntent, PackageManager.MATCH_DEFAULT_ONLY);
-
-        for (ResolveInfo resolveInfo : whatsappInfoList) {
-            String packageName = resolveInfo.activityInfo.packageName;
-            if (packageName.contains("whatsapp")) {
-                Log.d(TAG, "WhatsApp package found using intent resolution: " + packageName);
-                return true;
-            }
-        }
-
-        // Third check - specifically look for WhatsApp URI handling
+        // Method 2: Check for WhatsApp URI scheme
         try {
-            Intent uriIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("whatsapp://"));
-            if (uriIntent.resolveActivity(pm) != null) {
-                Log.d(TAG, "WhatsApp found via URI scheme handling");
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse("whatsapp://"));
+            if (intent.resolveActivity(pm) != null) {
+                Log.d(TAG, "WhatsApp found via URI scheme");
                 return true;
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error checking WhatsApp URI handling: " + e.getMessage());
+            Log.e(TAG, "Error checking WhatsApp URI: " + e.getMessage());
+        }
+
+        // Method 3: Check for WhatsApp in installed applications
+        try {
+            List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+            for (ApplicationInfo packageInfo : packages) {
+                if (packageInfo.packageName.contains("whatsapp")) {
+                    Log.d(TAG, "WhatsApp found in installed apps: " + packageInfo.packageName);
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking installed apps: " + e.getMessage());
         }
 
         return false;
     }
 
     private boolean tryOpenWhatsApp() {
-        Log.d(TAG, "Trying all methods to open WhatsApp");
+        Log.d(TAG, "Trying to open WhatsApp");
 
-        if (tryDirectPackageOpen()) return true;
-        if (tryComponentNameMethod()) return true;
-        if (tryURIScheme()) return true;
-
-        // As a last resort, try to open WhatsApp using a common action
-        try {
-            Intent shareIntent = new Intent(Intent.ACTION_SEND);
-            shareIntent.setType("text/plain");
-
-            PackageManager pm = getPackageManager();
-            List<ResolveInfo> activities = pm.queryIntentActivities(shareIntent, 0);
-
-            for (ResolveInfo info : activities) {
-                if (info.activityInfo.packageName.contains("whatsapp")) {
-                    Intent whatsappIntent = new Intent(Intent.ACTION_SEND);
-                    whatsappIntent.setType("text/plain");
-                    whatsappIntent.setPackage(info.activityInfo.packageName);
-                    whatsappIntent.putExtra(Intent.EXTRA_TEXT, "");
-                    startActivity(whatsappIntent);
-                    return true;
-                }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error with share intent method: " + e.getMessage());
+        // Method 1: Try direct package launch
+        if (tryDirectPackageOpen()) {
+            return true;
         }
 
-        return false;
+        // Method 2: Try URI scheme
+        if (tryURIScheme()) {
+            return true;
+        }
+
+        // Method 3: Try share intent
+        if (tryShareIntent()) {
+            return true;
+        }
+
+        // Method 4: Try main activity intent
+        return tryMainActivityIntent();
     }
 
     private boolean tryDirectPackageOpen() {
@@ -280,44 +236,29 @@ public class EncryptionActivity extends AppCompatActivity {
         return false;
     }
 
-    private boolean tryComponentNameMethod() {
-        String[] packages = {
-                "com.whatsapp",
-                "com.whatsapp.w4b"
-        };
-
-        PackageManager pm = getPackageManager();
-
-        for (String packageName : packages) {
-            try {
-                Intent launchIntent = new Intent(Intent.ACTION_MAIN);
-                launchIntent.addCategory(Intent.CATEGORY_LAUNCHER);
-
-                // Find activities that can handle this intent
-                List<ResolveInfo> activities = pm.queryIntentActivities(launchIntent, 0);
-
-                for (ResolveInfo info : activities) {
-                    if (info.activityInfo.packageName.equals(packageName)) {
-                        ComponentName component = new ComponentName(
-                                packageName,
-                                info.activityInfo.name
-                        );
-
-                        Intent intent = new Intent(Intent.ACTION_MAIN);
-                        intent.addCategory(Intent.CATEGORY_LAUNCHER);
-                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        intent.setComponent(component);
-
-                        startActivity(intent);
-                        Log.d(TAG, "Opened WhatsApp with component: " + component);
-                        return true;
-                    }
+    private boolean tryMainActivityIntent() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_MAIN);
+            intent.addCategory(Intent.CATEGORY_LAUNCHER);
+            
+            PackageManager pm = getPackageManager();
+            List<ResolveInfo> activities = pm.queryIntentActivities(intent, 0);
+            
+            for (ResolveInfo info : activities) {
+                if (info.activityInfo.packageName.contains("whatsapp")) {
+                    Intent launchIntent = new Intent(Intent.ACTION_MAIN);
+                    launchIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+                    launchIntent.setPackage(info.activityInfo.packageName);
+                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(launchIntent);
+                    Log.d(TAG, "Opened WhatsApp using main activity: " + info.activityInfo.packageName);
+                    return true;
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "Error with component method: " + e.getMessage());
             }
+        } catch (Exception e) {
+            Log.e(TAG, "Error with main activity method: " + e.getMessage());
         }
-
+        
         return false;
     }
 
@@ -334,17 +275,29 @@ public class EncryptionActivity extends AppCompatActivity {
             Log.e(TAG, "Error with URI method: " + e.getMessage());
         }
 
-        // Try additional URI schemes specific to WhatsApp
+        return false;
+    }
+
+    private boolean tryShareIntent() {
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setData(Uri.parse("whatsapp://chat"));
-            if (intent.resolveActivity(getPackageManager()) != null) {
-                startActivity(intent);
-                Log.d(TAG, "Opened WhatsApp with chat URI scheme");
-                return true;
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("text/plain");
+
+            PackageManager pm = getPackageManager();
+            List<ResolveInfo> activities = pm.queryIntentActivities(shareIntent, 0);
+
+            for (ResolveInfo info : activities) {
+                if (info.activityInfo.packageName.contains("whatsapp")) {
+                    Intent whatsappIntent = new Intent(Intent.ACTION_SEND);
+                    whatsappIntent.setType("text/plain");
+                    whatsappIntent.setPackage(info.activityInfo.packageName);
+                    whatsappIntent.putExtra(Intent.EXTRA_TEXT, "");
+                    startActivity(whatsappIntent);
+                    return true;
+                }
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error with chat URI method: " + e.getMessage());
+            Log.e(TAG, "Error with share intent method: " + e.getMessage());
         }
 
         return false;
@@ -353,15 +306,24 @@ public class EncryptionActivity extends AppCompatActivity {
     private void showWhatsAppNotFoundDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("WhatsApp לא נמצא");
-        builder.setMessage("לא נמצא WhatsApp במכשיר. האם ברצונך להתקין את WhatsApp?");
-        builder.setPositiveButton("כן", new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                openWhatsAppPlayStore();
-            }
-        });
-        builder.setNegativeButton("לא", null);
+        builder.setMessage("לא נמצאה התקנה של WhatsApp במכשיר. האם תרצה להתקין את WhatsApp?");
+        builder.setPositiveButton("התקן", (dialog, which) -> openWhatsAppPlayStore());
+        builder.setNegativeButton("ביטול", null);
         builder.show();
+    }
+
+    private void openWhatsAppPlayStore() {
+        try {
+            Log.d(TAG, "Opening WhatsApp on Play Store");
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse("market://details?id=com.whatsapp"));
+            startActivity(intent);
+        } catch (Exception e) {
+            // If Play Store not available, open browser
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse("https://play.google.com/store/apps/details?id=com.whatsapp"));
+            startActivity(intent);
+        }
     }
 
     @Override
