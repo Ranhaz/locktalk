@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.example.locktalk_01"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.example.locktalk_01"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 
@@ -52,11 +52,14 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+    implementation ("androidx.security:security-crypto:1.1.0-alpha03")
     implementation(libs.androidx.room.common)
+    implementation ("com.google.android.material:material:1.11.0")
     implementation(libs.androidx.room.runtime.android)
     implementation("com.airbnb.android:lottie:6.0.0")
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.auth.ktx)
+    implementation(libs.androidx.security.crypto)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

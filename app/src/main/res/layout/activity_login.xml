@@ -1,100 +1,131 @@
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/gradient_background">
+    android:orientation="vertical"
+    android:background="@drawable/splash_background"
+    android:paddingHorizontal="24dp"
+    android:gravity="center">
 
-    <!-- לוגו -->
-    <ImageView
-        android:id="@+id/logoImageView"
-        android:layout_width="wrap_content"
+    <Space
+        android:layout_width="match_parent"
         android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <ImageView
+        android:layout_width="250dp"
+        android:layout_height="250dp"
         android:src="@drawable/ic_logo_white"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintHeight_percent="0.33" />
+        android:contentDescription="LockTalk Logo"
+        android:layout_marginBottom="48dp"/>
 
-    <!-- שדה שם משתמש -->
-    <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/usernameLayout"
-        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+    <EditText
+        android:id="@+id/usernameInput"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:hint="שם משתמש"
+        android:textAlignment="viewEnd"
+        android:textColorHint="#CCCCCC"
+        android:textColor="#FFFFFF"
+        android:background="@android:color/transparent"
+        android:paddingHorizontal="4dp"
+        android:layout_marginBottom="24dp"
+        android:inputType="text"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#335C7D"
+        android:layout_marginBottom="24dp"/>
+
+    <EditText
+        android:id="@+id/passwordInput"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:hint="סיסמה"
+        android:textAlignment="viewEnd"
+        android:textColorHint="#CCCCCC"
+        android:textColor="#FFFFFF"
+        android:background="@android:color/transparent"
+        android:paddingHorizontal="4dp"
+        android:layout_marginBottom="24dp"
+        android:inputType="textPassword"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#335C7D"
+        android:layout_marginBottom="24dp"/>
+
+    <EditText
+        android:id="@+id/confirmPasswordInput"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:hint="אימות סיסמה"
+        android:textAlignment="viewEnd"
+        android:textColorHint="#CCCCCC"
+        android:textColor="#FFFFFF"
+        android:background="@android:color/transparent"
+        android:paddingHorizontal="4dp"
+        android:layout_marginBottom="24dp"
+        android:inputType="textPassword"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#335C7D"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView
+        android:id="@+id/passwordRequirementsText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="32dp"
-        android:layout_marginTop="48dp"
-        android:hint="@string/username"
-        app:layout_constraintTop_toBottomOf="@id/logoImageView"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        android:text="הסיסמה חייבת להכיל לפחות 8 תווים, אות גדולה אחת ותו מיוחד אחד"
+        android:textColor="#CCCCCC"
+        android:textSize="14sp"
+        android:textAlignment="viewEnd"
+        android:layout_marginBottom="32dp"/>
 
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/usernameEditText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@android:color/white" />
-    </com.google.android.material.textfield.TextInputLayout>
-
-    <!-- שדה סיסמה -->
-    <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/passwordLayout"
-        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="32dp"
-        android:layout_marginTop="16dp"
-        android:hint="@string/password"
-        app:layout_constraintTop_toBottomOf="@id/usernameLayout"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:passwordToggleEnabled="true">
-
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/passwordEditText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="textPassword"
-            android:textColor="@android:color/white" />
-    </com.google.android.material.textfield.TextInputLayout>
-
-    <!-- כפתור התחברות -->
-    <com.google.android.material.button.MaterialButton
+    <Button
         android:id="@+id/loginButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="32dp"
-        android:layout_marginTop="32dp"
-        android:text="@string/login_button"
-        app:cornerRadius="8dp"
-        app:layout_constraintTop_toBottomOf="@id/passwordLayout"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        android:text="התחברות"
+        android:background="#165C7D"
+        android:textColor="#FFFFFF"
+        android:layout_marginBottom="16dp"/>
 
-    <!-- קישור להרשמה -->
-    <TextView
-        android:id="@+id/registerTextView"
-        android:layout_width="wrap_content"
+    <Button
+        android:id="@+id/registerButton"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/register"
-        android:textColor="@android:color/white"
+        android:text="הרשמה"
+        android:visibility="gone"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView
+        android:id="@+id/switchModeText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="אין לך חשבון? לחץ כאן להרשמה"
         android:textSize="16sp"
-        app:layout_constraintTop_toBottomOf="@id/loginButton"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        android:textColor="#33C3F0"
+        android:clickable="true"
+        android:gravity="center"
+        android:layout_marginBottom="32dp"/>
 
-    <!-- סלוגן למטה -->
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
     <TextView
-        android:id="@+id/taglineBottom"
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="64dp"
-        android:text="@string/privacy_that_speaks"
-        android:textColor="@android:color/white"
+        android:text="יישום זה משתמש ב-Android Keystore System להצפנת ופענוח מידע רגיש באופן מאובטח"
         android:textSize="14sp"
-        android:textStyle="bold"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
-</androidx.constraintlayout.widget.ConstraintLayout>
+        android:textColor="#CCCCCC"
+        android:textAlignment="center"
+        android:layout_marginBottom="32dp"/>
+
+</LinearLayout>

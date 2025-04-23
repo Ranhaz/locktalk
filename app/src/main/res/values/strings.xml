@@ -1,14 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">LockTalk</string>
-    <string name="login">התחבר</string>
-    <string name="register">הרשמה</string>
-    <string name="username">שם משתמש</string>
-    <string name="password">סיסמה</string>
-    <string name="accessibility_service_description">LockTalk מאפשר לך להצפין ולפענח הודעות ב־WhatsApp תוך שמירה על פרטיות.</string>
-    <string name="accessibility_permission_title">אפשר הרשאת נגישות ל-LockTalk</string>
-    <string name="select_contact">בחר איש קשר להצפנה</string>
-    <string name="privacy_that_speaks">PRIVACY THAT SPEAKS FOR ITSELF</string>
-    <string name="login_button">התחברות</string>
-    <string name="accessibility_permission_message">לפני שנמשיך שים לב! כדי לאפשר הצפנה ופענוח של הודעות ותמונות  ב-WhatsApp, יש לאפשר ל-LockTalk גישה בהגדרות המכשיר.</string>
-    <string name="enable_accessibility">אפשר נגישות</string>
+    <string name="pin_invalid_length">Invalid PIN length</string>
+    <string name="message_decrypted">Message Decrypted</string>
+    <string name="wrong_pin">Wrong PIN, please try again</string>
+    <string name="pin_invalid">Invalid PIN</string>
+    <string name="app_name">Lock Talk</string>
+    <string name="accessibility_service_description">שירות הצפנת הודעות במסנג׳רים</string>
+    <string name="permission_dialog_title">נדרש אישור גישה</string>
+    <string name="permission_dialog_message">אנא הפעל את שירות הנגישות כדי להצפין הודעות. לאחר מכן יש לחזור לאפליקציה!</string>
+    <string name="open_settings">פתח הגדרות</string>
+    <string name="cancel">ביטול</string>
+    <string name="service_enabled">שירות הנגישות מופעל ✓</string>
+    <string name="service_disabled">שירות הנגישות אינו מופעל ✗</string>
+    <string name="enable_accessibility">בדוק הרשאות נגישות</string>
+    <string name="open_whatsapp">פתח וואטסאפ</string>
+    <string name="whatsapp_not_installed">וואטסאפ אינו מותקן</string>
+    <string name="opening_whatsapp">פותח את וואטסאפ...</string>
+    <string name="usage_instructions">כיצד להשתמש:\n1. לחץ על הכפתור למעלה כדי להפעיל את שירות הנגישות\n2. בהגדרות הנגישות, מצא את \"Whisper Weave\"\n3. הפעל את השירות וחזור לאפליקציה\n4. פתח את וואטסאפ - הודעות יוצפנו אוטומטית</string>
+
+    <!-- New strings for PIN dialog -->
+    <string name="enter_pin">הכנס קוד PIN</string>
+    <string name="enter_pin_title">הכנס קוד אישי</string>
+    <string name="enter_pin_message">הזן את הקוד האישי שלך כדי לפענח את ההודעה</string>
+    <string name="pin_hint">קוד (4 ספרות)</string>
+    <string name="decrypt">פענח</string>
+    <string name="service_connected">שירות הצפנת הודעות מופעל</string>
+    <string name="error_showing_dialog">שגיאה בהצגת תיבת הדו-שיח</string>
+    <string name="message_already_decrypted">ההודעה כבר פוענחה</string>
 </resources>

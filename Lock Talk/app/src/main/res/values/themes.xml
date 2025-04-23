@@ -1,8 +1,0 @@
-<resources>
-    <style name="Theme.LockTalk" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">#6A1B9A</item>
-        <item name="colorPrimaryVariant">#4A148C</item>
-        <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="android:statusBarColor">#4A148C</item>
-    </style>
-</resources>

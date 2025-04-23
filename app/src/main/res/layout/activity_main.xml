@@ -1,27 +1,24 @@
-<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:gravity="center"
-    android:padding="24dp"
-    android:background="@drawable/gradient_background_light">
+    android:padding="16dp">
 
-    <TextView
-        android:id="@+id/chat_title"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="הצפנה לשיחה עם"
-        android:textColor="@android:color/white"
-        android:textSize="20sp"
-        android:layout_marginBottom="32dp"/>
-
+    <!-- כפתור לבדיקת הרשאות -->
     <Button
-        android:id="@+id/open_whatsapp_button"
+        android:id="@+id/check_permission_button"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="פתח את וואטסאפ"
-        android:background="@drawable/button_primary"
-        android:textColor="@android:color/white"
-        android:padding="12dp" />
+        android:text="Check Permissions" />
+
+    <!-- TextView עבור סטטוס -->
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Permission Status"
+        android:textSize="16sp"
+        android:textColor="@android:color/black"
+        android:layout_marginTop="20dp"/>
+
 </LinearLayout>

@@ -1,37 +1,53 @@
 package com.example.locktalk_01.activities;
 
 import android.content.Intent;
-import android.net.Uri;
+import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.widget.Button;
-import android.widget.TextView;
+import android.util.Log;
 import androidx.appcompat.app.AppCompatActivity;
-import com.example.locktalk_01.R;
 
 public class MainActivity extends AppCompatActivity {
-
-    private TextView chatTitle;
-    private Button openWhatsappButton;
-    private String contactName;
+    private static final String TAG = "MainActivity";
+    private static final String PREF_NAME = "UserCredentials";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        chatTitle = findViewById(R.id.chat_title);
-        openWhatsappButton = findViewById(R.id.open_whatsapp_button);
 
-        contactName = getIntent().getStringExtra("contact");
-        chatTitle.setText("הצפנה לשיחה עם " + contactName);
+        SharedPreferences prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        boolean isAccessibilityEnabled = prefs.getBoolean("accessibilityEnabled", false);
+        boolean isLoggedIn = prefs.getBoolean("isLoggedIn", false);
 
-        openWhatsappButton.setOnClickListener(v -> {
-            // נפתח פשוט את ווטסאפ – ללא מספר. (רק כדוגמה.)
-            Intent launchIntent = getPackageManager().getLaunchIntentForPackage("com.whatsapp");
-            if (launchIntent != null) {
-                startActivity(launchIntent);
-            } else {
-                chatTitle.setText("לא נמצאה אפליקציית וואטסאפ במכשיר");
-            }
-        });
+        Log.d(TAG, "Accessibility enabled: " + isAccessibilityEnabled);
+        Log.d(TAG, "Is logged in: " + isLoggedIn);
+
+        Intent intent;
+
+        // First check accessibility
+        if (!isAccessibilityEnabled) {
+            intent = new Intent(this, AccessibilityActivity.class);
+            Log.d(TAG, "Starting AccessibilityActivity - accessibility not enabled");
+        }
+        // Then check login status
+        else if (!isLoggedIn) {
+            intent = new Intent(this, LoginActivity.class);
+            Log.d(TAG, "Starting LoginActivity - user not logged in");
+        }
+        // Finally, if both accessibility and login are ok, go to encryption
+        else {
+            intent = new Intent(this, EncryptionActivity.class);
+            Log.d(TAG, "Starting EncryptionActivity - both accessibility and login are enabled");
+        }
+
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        startActivity(intent);
+        overridePendingTransition(0, 0);
+        finish();
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        overridePendingTransition(0, 0);
     }
 }
