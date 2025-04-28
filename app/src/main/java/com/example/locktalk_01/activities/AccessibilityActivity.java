@@ -1,7 +1,6 @@
 package com.example.locktalk_01.activities;
 
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
@@ -12,7 +11,6 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.locktalk_01.R;
-import com.example.locktalk_01.services.MyAccessibilityService;
 
 public class AccessibilityActivity extends AppCompatActivity {
     private static final String TAG = "AccessibilityActivity";
@@ -51,26 +49,22 @@ public class AccessibilityActivity extends AppCompatActivity {
             }
         });
     }
-
     @Override
     protected void onResume() {
         super.onResume();
-        overridePendingTransition(0, 0);
+        overridePendingTransition(0,0);
 
-        if (isNavigatingToSettings) {
-            isNavigatingToSettings = false;
-            checkAccessibilityAndProceed();
-        }
+        //  *** FIX ***  תמיד בודקים; לא צריך isNavigatingToSettings
+        checkAccessibilityAndProceed();
     }
 
     private void checkAccessibilityAndProceed() {
         if (accessibilityManager.isAccessibilityServiceEnabled()) {
             accessibilityManager.saveAccessibilityEnabled();
-            navigateToLogin();
-        } else {
-            Toast.makeText(this, "נא להפעיל את שירות הנגישות כדי להמשיך", Toast.LENGTH_LONG).show();
+            navigateToLogin();                // ינווט ל-Login או Encryption לפי הדגלים
         }
     }
+
 
     private void navigateToLogin() {
         Log.d(TAG, "Navigating to LoginActivity");

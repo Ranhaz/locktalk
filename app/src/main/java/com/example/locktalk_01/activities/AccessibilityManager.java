@@ -7,37 +7,47 @@ import android.provider.Settings;
 import com.example.locktalk_01.services.MyAccessibilityService;
 
 public class AccessibilityManager {
-    private static final String PREF_NAME = "UserCredentials";
-    private final Context context;
 
-    public AccessibilityManager(Context context) {
-        this.context = context;
-    }
+    private static final String PREF_NAME       = "UserCredentials";
+    private static final String KEY_LOGGED_IN   = "isLoggedIn";
+    private static final String KEY_ACCESS_FLAG = "accessibilityEnabled";
 
+    private final Context ctx;
+
+    public AccessibilityManager(Context c) { this.ctx = c.getApplicationContext(); }
+
+    /* ---------------------------------------------------- */
+    /*   Accessibility service enabled?                     */
+    /* ---------------------------------------------------- */
     public boolean isAccessibilityServiceEnabled() {
-        String serviceName = context.getPackageName() + "/" + MyAccessibilityService.class.getCanonicalName();
-        String enabledServices = Settings.Secure.getString(
-                context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        return enabledServices != null && enabledServices.contains(serviceName);
+        String serviceName = ctx.getPackageName()+"/"+ MyAccessibilityService.class.getCanonicalName();
+        String enabled = Settings.Secure.getString(ctx.getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        return enabled != null && enabled.contains(serviceName);
     }
 
+    /** marker used once, e.g. after the user enabled the toggle in system settings */
     public void saveAccessibilityEnabled() {
-        SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putBoolean("accessibilityEnabled", true);
-        editor.apply();
+        prefs().edit().putBoolean(KEY_ACCESS_FLAG, true).apply();
     }
 
+    /* ---------------------------------------------------- */
+    /*   Login flag handling                                */
+    /* ---------------------------------------------------- */
     public boolean isUserLoggedIn() {
-        SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        return prefs.getBoolean("isLoggedIn", false);
+        return prefs().getBoolean(KEY_LOGGED_IN, false);
     }
 
-    // Add this new method to reset the login status for testing
-    public void clearLoginStatus() {
-        SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putBoolean("isLoggedIn", false);
-        editor.apply();
+    /** Set <code>loggedIn</code> flag; called by LoginActivity & EncryptionActivity. */
+    public void setLoggedIn(boolean v) {
+        prefs().edit().putBoolean(KEY_LOGGED_IN, v).apply();
+    }
+
+    /** helper used mainly for tests */
+    public void clearLoginStatus() { setLoggedIn(false); }
+
+    /* ---------------------------------------------------- */
+    private SharedPreferences prefs() {
+        return ctx.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
     }
 }

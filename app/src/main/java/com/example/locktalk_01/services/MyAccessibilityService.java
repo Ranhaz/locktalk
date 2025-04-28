@@ -565,21 +565,11 @@ public class MyAccessibilityService extends AccessibilityService {
             View dialogView = LayoutInflater.from(this).inflate(R.layout.personal_code_dialog, null);
             builder.setView(dialogView);
 
-            TextView encryptedMessageText = dialogView.findViewById(R.id.encryptedMessageText);
             TextView decryptedMessageText = dialogView.findViewById(R.id.decryptedMessageText);
             EditText personalCodeInput = dialogView.findViewById(R.id.personalCodeDialogInput);
             Button confirmButton = dialogView.findViewById(R.id.personalCodeConfirmButton);
             Button cancelButton = dialogView.findViewById(R.id.personalCodeCancelButton);
 
-            // Set the primary selected text
-            if (encryptedMessageText != null) {
-                String displayText = primaryMessage;
-                if (messages.size() > 1) {
-                    displayText += " (+" + (messages.size() - 1) + " הודעות נוספות)";
-                }
-                encryptedMessageText.setText(displayText);
-                Log.d(TAG, "Set encrypted text in dialog: " + displayText);
-            }
 
             if (decryptedMessageText != null) {
                 decryptedMessageText.setText("");

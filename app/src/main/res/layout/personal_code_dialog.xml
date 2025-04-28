@@ -14,17 +14,7 @@
         android:gravity="center"
         android:layout_marginBottom="16dp"/>
 
-    <TextView
-        android:id="@+id/encryptedMessageText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="ההודעה המוצפנת תופיע כאן"
-        android:textSize="14sp"
-        android:gravity="center"
-        android:background="#F0F0F0"
-        android:padding="8dp"
-        android:minLines="3"
-        android:layout_marginBottom="16dp"/>
+
 
     <EditText
         android:id="@+id/personalCodeDialogInput"

@@ -105,7 +105,6 @@ public class DialogManager {
             View dialogView = LayoutInflater.from(context).inflate(R.layout.personal_code_dialog, null);
             builder.setView(dialogView);
 
-            TextView encryptedMessageText = dialogView.findViewById(R.id.encryptedMessageText);
             TextView decryptedMessageText = dialogView.findViewById(R.id.decryptedMessageText);
             EditText personalCodeInput = dialogView.findViewById(R.id.personalCodeDialogInput);
             Button confirmButton = dialogView.findViewById(R.id.personalCodeConfirmButton);

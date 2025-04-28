@@ -6,7 +6,20 @@
     <!-- Add permission for drawing overlays -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.ACTION_MANAGE_OVERLAY_PERMISSION" />
-
+    <queries>
+        <package android:name="com.whatsapp"/>
+        <package android:name="com.whatsapp.w4b"/>
+        <package android:name="com.gbwhatsapp"/>
+        <package android:name="com.whatsapp.plus"/>
+        <package android:name="com.yowhatsapp"/>
+        <package android:name="com.fmwhatsapp"/>
+        <package android:name="io.fouad.whatsapp"/>
+        <package android:name="com.whatsapp.gold"/>
+        <intent>
+            <action android:name="android.intent.action.SEND"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
