@@ -42,10 +42,10 @@ android {
 }
 
 dependencies {
-    implementation(platform("com.google.firebase:firebase-bom:32.7.2"))
-    implementation ("com.google.firebase:firebase-auth")
-    implementation ("com.google.firebase:firebase-firestore")
     implementation(libs.androidx.core.ktx)
+    implementation(platform(libs.firebase.bom))
+    implementation (libs.firebase.auth)
+    implementation (libs.google.firebase.firestore)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
@@ -55,11 +55,11 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
-    implementation ("androidx.security:security-crypto:1.1.0-alpha03")
+    implementation (libs.androidx.security.crypto.v110alpha03)
     implementation(libs.androidx.room.common)
-    implementation ("com.google.android.material:material:1.11.0")
+    implementation (libs.material.v1110)
     implementation(libs.androidx.room.runtime.android)
-    implementation("com.airbnb.android:lottie:6.0.0")
+    implementation(libs.lottie)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.auth.ktx)
     implementation(libs.androidx.security.crypto)
