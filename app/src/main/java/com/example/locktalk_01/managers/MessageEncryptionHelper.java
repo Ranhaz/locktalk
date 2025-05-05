@@ -1,37 +1,51 @@
 package com.example.locktalk_01.managers;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.util.Log;
 
 import com.example.locktalk_01.activities.AndroidKeystorePlugin;
-import com.example.locktalk_01.utils.TextInputUtils;
 
-import android.content.Context;
-import android.content.SharedPreferences;
-import android.util.Log;
-import java.security.KeyStore;
+/**
+ * מחלקה מסייעת לעבודה עם AndroidKeystorePlugin:
+ * - שמירת/שליפת הודעות מוצפנות
+ * - ניהול קוד אישי
+ * - מחיקת הודעות
+ */
 public class MessageEncryptionHelper {
     private static final String TAG = "MessageEncryptionHelper";
 
-    private Context context;
-    private AndroidKeystorePlugin keystorePlugin;
+    private final Context context;
+    private final AndroidKeystorePlugin keystorePlugin;
     private String currentPersonalCode;
 
     public MessageEncryptionHelper(Context context) {
-        this.context = context;
-        this.keystorePlugin = new AndroidKeystorePlugin(context);
+        this.context = context.getApplicationContext();
+        this.keystorePlugin = new AndroidKeystorePlugin(this.context);
 
-        // Initialize currentPersonalCode from SharedPreferences
-        SharedPreferences prefs = context.getSharedPreferences(AndroidKeystorePlugin.USER_CREDENTIALS, Context.MODE_PRIVATE);
-        this.currentPersonalCode = prefs.getString(AndroidKeystorePlugin.PERSONAL_CODE_KEY, "");
+        // טען את הקוד האישי הנוכחי מ-SharedPreferences
+        SharedPreferences prefs = this.context.getSharedPreferences(
+                AndroidKeystorePlugin.USER_CREDENTIALS,
+                Context.MODE_PRIVATE
+        );
+        this.currentPersonalCode = prefs.getString(
+                AndroidKeystorePlugin.PERSONAL_CODE_KEY,
+                ""
+        );
     }
 
     /**
-     * Save an encrypted message using the current personal code
+     * שומר הודעה מוצפנת באמצעות הקוד האישי הנוכחי.
+     * @param message הטקסט הגולמי להצפנה
+     * @return true אם נשמר בהצלחה, false אחרת
      */
     public boolean saveEncryptedMessage(String message) {
+        if (currentPersonalCode.isEmpty()) {
+            Log.e(TAG, "Cannot save: personal code not set");
+            return false;
+        }
         try {
-            return keystorePlugin.saveEncryptedMessage(message);
+            return keystorePlugin.saveEncryptedMessage(currentPersonalCode, message);
         } catch (Exception e) {
             Log.e(TAG, "Error saving encrypted message", e);
             return false;
@@ -39,9 +53,15 @@ public class MessageEncryptionHelper {
     }
 
     /**
-     * Get a decrypted message using the specified personal code
+     * מנסה לפענח את ההודעה האחרונה שהוצפנה באמצעות הקוד הנתון.
+     * @param personalCode הקוד להזדהות
+     * @return הטקסט המפוענח, או null במקרה של שגיאה/קוד שגוי
      */
     public String getDecryptedMessage(String personalCode) {
+        if (personalCode == null || personalCode.isEmpty()) {
+            Log.e(TAG, "Cannot decrypt: personal code not set");
+            return null;
+        }
         try {
             return keystorePlugin.getDecryptedMessage(personalCode);
         } catch (Exception e) {
@@ -51,27 +71,32 @@ public class MessageEncryptionHelper {
     }
 
     /**
-     * Update the personal code
+     * עדכון הקוד האישי, כולל שמירת הקוד הישן
+     * ל-usedPersonalCodes ולהגדרתו כ–currentPersonalCode.
      */
     public boolean updatePersonalCode(String newCode) {
         if (newCode == null || newCode.isEmpty()) {
+            Log.e(TAG, "Cannot update: new code is empty");
             return false;
         }
-
         try {
-            // Remember the old code if it was set
             if (!currentPersonalCode.isEmpty()) {
                 keystorePlugin.addUsedPersonalCode(currentPersonalCode);
             }
+            boolean pluginOk = keystorePlugin.updatePersonalCode(newCode);
 
-            // Update the current code
-            currentPersonalCode = newCode;
+            SharedPreferences prefs = context.getSharedPreferences(
+                    AndroidKeystorePlugin.USER_CREDENTIALS,
+                    Context.MODE_PRIVATE
+            );
+            prefs.edit()
+                    .putString(AndroidKeystorePlugin.PERSONAL_CODE_KEY, newCode)
+                    .apply();
 
-            SharedPreferences prefs = context.getSharedPreferences(AndroidKeystorePlugin.USER_CREDENTIALS, Context.MODE_PRIVATE);
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putString(AndroidKeystorePlugin.PERSONAL_CODE_KEY, newCode);
-
-            return keystorePlugin.updatePersonalCode(newCode);
+            if (pluginOk) {
+                currentPersonalCode = newCode;
+            }
+            return pluginOk;
         } catch (Exception e) {
             Log.e(TAG, "Error updating personal code", e);
             return false;
@@ -79,23 +104,9 @@ public class MessageEncryptionHelper {
     }
 
     /**
-     * Delete all encrypted messages
+     * מוחק את כל ההודעות המוצפנות
      */
     public boolean deleteAllMessages() {
         return keystorePlugin.deleteAllMessages();
-    }
-
-    /**
-     * Copy text to clipboard
-     */
-    public void copyToClipboard(String text) {
-        TextInputUtils.copyToClipboard(context, text);
-    }
-
-    /**
-     * Try to replace text in WhatsApp input field
-     */
-    public boolean replaceWhatsAppText(String newText) {
-        return TextInputUtils.performTextReplacement(context, null, newText);
     }
 }

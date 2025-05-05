@@ -4,7 +4,6 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
-import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -14,9 +13,7 @@ import com.example.locktalk_01.R;
 
 public class AccessibilityActivity extends AppCompatActivity {
     private static final String TAG = "AccessibilityActivity";
-    private Button enableAccessibilityButton;
-    private TextView accessibilityInfoText;
-    private boolean isNavigatingToSettings = false;
+
     private AccessibilityManager accessibilityManager;
 
     @Override
@@ -25,9 +22,10 @@ public class AccessibilityActivity extends AppCompatActivity {
 
         accessibilityManager = new AccessibilityManager(this);
 
-        // Check if accessibility is already enabled
+        // אם השירות כבר פעיל, נשמור את הדגל וננקה את הסטטוס של ההתחברות
         if (accessibilityManager.isAccessibilityServiceEnabled()) {
             accessibilityManager.saveAccessibilityEnabled();
+            accessibilityManager.clearLoginStatus();    // <<< שורה זו הוסרה
             Log.d(TAG, "Accessibility already enabled, proceeding to LoginActivity");
             navigateToLogin();
             return;
@@ -35,41 +33,40 @@ public class AccessibilityActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_accessibility);
 
-        enableAccessibilityButton = findViewById(R.id.enableAccessibilityButton);
-        accessibilityInfoText = findViewById(R.id.accessibilityInfoText);
+        Button enableAccessibilityButton = findViewById(R.id.enableAccessibilityButton);
+        TextView accessibilityInfoText = findViewById(R.id.accessibilityInfoText);
 
-        enableAccessibilityButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                isNavigatingToSettings = true;
-                Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-                Toast.makeText(AccessibilityActivity.this,
-                        "בחר באפשרות 'שירות הצפנת הודעות' כדי להפעיל את שירות ההצפנה", Toast.LENGTH_LONG).show();
-                startActivity(intent);
-            }
+        enableAccessibilityButton.setOnClickListener(v -> {
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            Toast.makeText(
+                    AccessibilityActivity.this,
+                    "בחר באפשרות 'שירות הצפנת הודעות' כדי להפעיל את שירות ההצפנה",
+                    Toast.LENGTH_LONG
+            ).show();
+            startActivity(intent);
         });
     }
+
     @Override
     protected void onResume() {
         super.onResume();
-        overridePendingTransition(0,0);
+        overridePendingTransition(0, 0);
 
-        //  *** FIX ***  תמיד בודקים; לא צריך isNavigatingToSettings
-        checkAccessibilityAndProceed();
-    }
-
-    private void checkAccessibilityAndProceed() {
+        // אחרי חזרה מ־Settings בודקים שוב
         if (accessibilityManager.isAccessibilityServiceEnabled()) {
             accessibilityManager.saveAccessibilityEnabled();
-            navigateToLogin();                // ינווט ל-Login או Encryption לפי הדגלים
+            accessibilityManager.clearLoginStatus();    // <<< ופה גם
+            navigateToLogin();
         }
     }
-
 
     private void navigateToLogin() {
         Log.d(TAG, "Navigating to LoginActivity");
         Intent intent = new Intent(this, LoginActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        intent.setFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK |
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK
+        );
         startActivity(intent);
         finish();
     }

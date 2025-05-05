@@ -3,631 +3,367 @@ package com.example.locktalk_01.services;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.AlertDialog;
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.net.Uri;
-import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.InputType;
+import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.Pair;
 import android.view.Gravity;
-import android.view.LayoutInflater;
-import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
-import com.example.locktalk_01.R;
 import com.example.locktalk_01.activities.AndroidKeystorePlugin;
-import com.example.locktalk_01.managers.DialogManager;
-import com.example.locktalk_01.managers.MessageEncryptionHelper;
-import  com.example.locktalk_01.utils.WhatsAppUtils;
-import com.example.locktalk_01.utils.TextInputUtils;
 import com.example.locktalk_01.managers.OverlayManager;
+import com.example.locktalk_01.utils.TextInputUtils;
+import com.example.locktalk_01.utils.WhatsAppUtils;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MyAccessibilityService extends AccessibilityService {
-    private static final String TAG = "MyAccessibilityService";
-    private static final String PREF_NAME = "UserCredentials";
+    private static final String TAG                = "MyAccessibilityService";
+    private static final String PREF_NAME          = "UserCredentials";
     private static final String PERSONAL_CODE_PREF = "personalCode";
-    private static final int MAX_TRACKED_MESSAGES = 5;
+    private static final String PREF_FAKE_MAP      = "FakeCipherMap";
 
     private AndroidKeystorePlugin keystorePlugin;
     private OverlayManager overlayManager;
     private Handler mainHandler;
-    private long lastOverlayCheck = 0;
-    private ArrayList<String> selectedMessages = new ArrayList<>();
-    private long lastSelectionTimestamp = 0;
-    private long lastSelectionCheckTime = 0;
-    private static final long SELECTION_CHECK_INTERVAL = 300; // check every 300ms to avoid too many operations
-    private AlertDialog activeDialog = null; // Keep track of active dialog to prevent multiple dialogs
-    // רשימת חבילות אפשריות של WhatsApp
-    private List<String> whatsappPackages = Arrays.asList(
-            "com.whatsapp",       // WhatsApp רגיל
-            "com.whatsapp.w4b",   // WhatsApp עסקי
-            "com.gbwhatsapp",     // GB WhatsApp
-            "com.whatsapp.plus",  // WhatsApp Plus
-            "com.yowhatsapp",     // YoWhatsApp
-            "com.whatsapp.android", // Alternative package name
-            "com.whatsapp.messenger" // Another common package name
-    );
+    private AlertDialog activeDialog;
+
+    private String lastEncryptedOrig    = "";
+    private boolean decryptAuthenticated = false;
+    private long decryptExpiryTimestamp;
+
+    private long lastDecryptTs = 0;
+    private static final long DECRYPT_THROTTLE_MS = 1000;
+
+    private boolean isReplacing = false;
+    private boolean overlayHiddenByUser = false;
+
+    private ExecutorService executor;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        try {
-            mainHandler = new Handler(Looper.getMainLooper());
-            keystorePlugin = new AndroidKeystorePlugin(this);
-            overlayManager = new OverlayManager(this, (WindowManager) getSystemService(WINDOW_SERVICE));
-            Log.d(TAG, "Service created successfully");
-
-            // Check for installed WhatsApp
-            checkInstalledWhatsApp();
-
-            checkOverlayPermission();
-        } catch (Exception e) {
-            Log.e(TAG, "Error in onCreate: ", e);
-            showToast("שגיאה באתחול השירות: " + e.getMessage());
-        }
+        mainHandler    = new Handler(Looper.getMainLooper());
+        keystorePlugin = new AndroidKeystorePlugin(this);
+        overlayManager = new OverlayManager(this,
+                (WindowManager)getSystemService(WINDOW_SERVICE));
+        executor       = Executors.newSingleThreadExecutor();
+        checkOverlayPermission();
     }
 
-    private void checkInstalledWhatsApp() {
-        try {
-            List<String> installedPackages = getInstalledPackages();
-            boolean whatsappFound = false;
-            String installedWhatsAppPackage = null;
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        executor.shutdownNow();
+    }
 
-            Log.d(TAG, "Checking installed packages for WhatsApp...");
-            for (String packageName : installedPackages) {
-                if (WhatsAppUtils.isWhatsAppPackage(packageName)) {
-                    whatsappFound = true;
-                    installedWhatsAppPackage = packageName;
-                    Log.d(TAG, "Found installed WhatsApp package: " + packageName);
-                    break;
+    @Override
+    protected void onServiceConnected() {
+        AccessibilityServiceInfo info = new AccessibilityServiceInfo();
+        info.packageNames = new String[]{
+                "com.whatsapp","com.whatsapp.w4b",
+                "com.gbwhatsapp","com.whatsapp.plus","com.yowhatsapp"
+        };
+        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                | AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                | AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
+                | AccessibilityEvent.TYPE_VIEW_SCROLLED;
+        info.feedbackType        = AccessibilityServiceInfo.FEEDBACK_GENERIC;
+        info.notificationTimeout = 50;
+        info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+                | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+        setServiceInfo(info);
+    }
+
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        if (event.getPackageName() == null) return;
+
+        long now  = System.currentTimeMillis();
+        String pkg = event.getPackageName().toString();
+        int type   = event.getEventType();
+
+        boolean inWhatsApp    = WhatsAppUtils.isWhatsAppPackage(pkg);
+        boolean decryptActive = decryptAuthenticated && now <= decryptExpiryTimestamp;
+
+        // 1) הצפנה אוטומטית כשמסיימים ב־$
+        if (!isReplacing
+                && inWhatsApp
+                && type == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null) {
+                CharSequence cs = WhatsAppUtils.getWhatsAppInputText(root);
+                root.recycle();
+                if (cs != null && cs.toString().endsWith("$")) {
+                    final String orig = cs.toString().substring(0, cs.length()-1);
+                    if (!orig.equals(lastEncryptedOrig)) {
+                        SharedPreferences prefs =
+                                getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+                        final String code = prefs.getString(PERSONAL_CODE_PREF,"");
+                        if (code.isEmpty()) {
+                            showToast("נא להגדיר קוד אישי");
+                        } else {
+                            isReplacing = true;
+                            mainHandler.postDelayed(() -> isReplacing = false, 500);
+                            executor.execute(() -> {
+                                try {
+                                    String actualCipher =
+                                            keystorePlugin.encryptToString(code, orig);
+                                    String fake = generateFakeEncryptedText(actualCipher.length());
+                                    getSharedPreferences(PREF_FAKE_MAP, MODE_PRIVATE)
+                                            .edit().putString(fake, actualCipher).apply();
+                                    mainHandler.post(() -> {
+                                        AccessibilityNodeInfo r2 = getRootInActiveWindow();
+                                        if (r2 != null) {
+                                            TextInputUtils.performTextReplacement(this, r2, fake);
+                                            r2.recycle();
+                                        }
+                                        showToast("הודעה מוצפנת");
+                                        lastEncryptedOrig = orig;
+                                    });
+                                } catch (Exception e) {
+                                    Log.e(TAG,"encrypt error",e);
+                                    mainHandler.post(() -> showToast("שגיאה בהצפנה"));
+                                }
+                            });
+                        }
+                    }
                 }
             }
+        }
 
-            if (!whatsappFound) {
-                Log.d(TAG, "WhatsApp not found on device");
-                mainHandler.post(() -> {
-                    showToast("WhatsApp לא נמצא במכשיר. אנא התקן את WhatsApp מהחנות");
-                    Intent intent = new Intent(Intent.ACTION_VIEW);
-                    intent.setData(Uri.parse("market://details?id=com.whatsapp"));
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(intent);
-                });
-            } else {
-                Log.d(TAG, "Using WhatsApp package: " + installedWhatsAppPackage);
-                // Update the package list to prioritize the installed version
-                whatsappPackages.clear();
-                whatsappPackages.add(installedWhatsAppPackage);
-                whatsappPackages.addAll(Arrays.asList(
-                    "com.whatsapp",
-                    "com.whatsapp.w4b",
-                    "com.gbwhatsapp",
-                    "com.whatsapp.plus",
-                    "com.yowhatsapp"
-                ));
+        // 2) פענוח רציף עם throttle
+        if (decryptActive
+                && (type==AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                || type==AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                || type==AccessibilityEvent.TYPE_VIEW_SCROLLED)
+                && now - lastDecryptTs > DECRYPT_THROTTLE_MS) {
+            lastDecryptTs = now;
+            final List<Pair<String,Rect>> toDecrypt = new ArrayList<>();
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null) {
+                List<AccessibilityNodeInfo> bubbles = WhatsAppUtils.findEncryptedMessages(root);
+                for (AccessibilityNodeInfo n : bubbles) {
+                    CharSequence t = n.getText();
+                    if (t != null) {
+                        Rect b = new Rect();
+                        n.getBoundsInScreen(b);
+                        toDecrypt.add(new Pair<>(t.toString(), b));
+                    }
+                    n.recycle();
+                }
+                root.recycle();
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Error checking installed WhatsApp: ", e);
+            executor.execute(() -> {
+                SharedPreferences fakeMap =
+                        getSharedPreferences(PREF_FAKE_MAP, MODE_PRIVATE);
+                SharedPreferences prefs   =
+                        getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+                for (Pair<String,Rect> p : toDecrypt) {
+                    String fake = p.first;
+                    String actual = fakeMap.getString(fake,null);
+                    if (actual!=null) {
+                        String code = prefs.getString(PERSONAL_CODE_PREF,"");
+                        try {
+                            String plain = keystorePlugin.loadDecryptedMessage(code, actual);
+                            if (plain!=null) {
+                                Rect b = p.second;
+                                mainHandler.post(() ->
+                                        overlayManager.showDecryptedOverlay(plain, b)
+                                );
+                            }
+                        } catch(Exception e) {
+                            Log.w(TAG,"decrypt failed",e);
+                        }
+                    }
+                }
+            });
+        }
+
+        // 3) ניהול ה־Overlay רק על שינוי חלון
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            manageOverlay(inWhatsApp, decryptActive);
         }
     }
 
-    private List<String> getInstalledPackages() {
-        List<String> packages = new ArrayList<>();
-        try {
-            List<android.content.pm.PackageInfo> installedPackages = getPackageManager().getInstalledPackages(0);
-            for (android.content.pm.PackageInfo packageInfo : installedPackages) {
-                packages.add(packageInfo.packageName);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error getting installed packages: ", e);
+    @Override public void onInterrupt() {}
+
+    private void manageOverlay(boolean inWhatsApp, boolean decryptActive) {
+        boolean shouldShow =
+                (inWhatsApp || decryptActive) &&
+                        !(overlayHiddenByUser && !decryptActive);
+
+        if (shouldShow && !overlayManager.isShown()) {
+            showMainOverlay();
+        } else if ((!shouldShow || overlayHiddenByUser) && overlayManager.isShown()) {
+            decryptAuthenticated  = false;
+            overlayHiddenByUser   = false;
+            overlayManager.clearDecryptOverlays();
+            overlayManager.hide();
         }
-        return packages;
+
+        if (!inWhatsApp) {
+            decryptAuthenticated  = false;
+            overlayHiddenByUser   = false;
+        }
+    }
+
+    /** מציג את ה־overlay הראשי במיקום קבוע + כפתור X שמבטל גם טיימר */
+    private void showMainOverlay() {
+        overlayManager.show(
+                v-> {},
+                v-> {
+                    decryptAuthenticated = false;
+                    overlayHiddenByUser  = false;     // כדי שלא נחסום show
+                    overlayManager.stopTimer();           // עוצר ומחזיר את הכפתור הירוק
+                    overlayManager.clearDecryptOverlays(); // מנקה את הבועות
+                },
+                v-> showDecryptAuthDialog()
+        );
+        int x = dpToPx(36);
+        int y = dpToPx(56) - mmToPx(5);
+        overlayManager.updatePosition(x, y);
+    }
+
+    private void showDecryptAuthDialog() {
+        if (overlayManager.isShown()) overlayManager.hide();
+        if (activeDialog!=null && activeDialog.isShowing()) activeDialog.dismiss();
+        if (decryptAuthenticated && System.currentTimeMillis()<=decryptExpiryTimestamp) {
+            showDecryptDurationDialog();
+            return;
+        }
+
+        EditText input = new EditText(this);
+        input.setHint("הזן קוד אימות");
+        input.setGravity(Gravity.CENTER);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setCustomTitle(makeCenteredTitle("קוד פיענוח"))
+                .setView(input)
+                .setPositiveButton("אישור",(d,w)->{
+                    String ent = input.getText().toString();
+                    String saved = getSharedPreferences(PREF_NAME,MODE_PRIVATE)
+                            .getString(PERSONAL_CODE_PREF,"");
+                    if (ent.equals(saved)) {
+                        decryptAuthenticated = true;
+                        overlayHiddenByUser  = false;
+                        showToast("אומת בהצלחה");
+                        showDecryptDurationDialog();
+                    } else {
+                        showToast("קוד שגוי");
+                    }
+                })
+                .setNegativeButton("ביטול",null)
+                .create();
+        configureDialogWindow(dlg);
+        dlg.show();
+        activeDialog = dlg;
+    }
+
+    private void showDecryptDurationDialog() {
+        if (activeDialog!=null && activeDialog.isShowing()) activeDialog.dismiss();
+
+        String[] items = {"1 דקה","5 דקות","10 דקות","15 דקות","30 דקות","שעה"};
+        int[] mins     = {1,5,10,15,30,60};
+        final int[] sel = {-1};
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setCustomTitle(makeCenteredTitle("משך פיענוח"))
+                .setSingleChoiceItems(items,-1,(d,w)-> sel[0]=w)
+                .setPositiveButton("הפעל",(d,w)->{
+                    if (sel[0]<0) {
+                        showToast("לא נבחר משך זמן");
+                        return;
+                    }
+                    decryptExpiryTimestamp =
+                            System.currentTimeMillis() + mins[sel[0]]*60_000L;
+                    showToast("פיענוח פעיל: "+items[sel[0]]);
+                    overlayHiddenByUser = false;
+                    showMainOverlay();
+                    overlayManager.startTimer(
+                            decryptExpiryTimestamp,
+                            () -> {
+                                decryptAuthenticated = false;
+                                overlayManager.clearDecryptOverlays();
+                                overlayManager.hide();
+                            }
+                    );
+                })
+                .setNegativeButton("ביטול",null)
+                .create();
+        configureDialogWindow(dlg);
+        dlg.show();
+        activeDialog = dlg;
+    }
+
+    private TextView makeCenteredTitle(String text) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(20);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(0, dpToPx(8), 0, dpToPx(8));
+        return t;
+    }
+
+    private void configureDialogWindow(AlertDialog dlg) {
+        WindowManager.LayoutParams lp = dlg.getWindow().getAttributes();
+        lp.type    = Build.VERSION.SDK_INT>=Build.VERSION_CODES.O
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+        lp.flags  &= ~WindowManager.LayoutParams.FLAG_DIM_BEHIND;
+        lp.dimAmount = 0f;
+        lp.gravity = Gravity.CENTER;
+        dlg.getWindow().setAttributes(lp);
     }
 
     private void checkOverlayPermission() {
         if (!Settings.canDrawOverlays(this)) {
             mainHandler.post(() -> {
-                showToast("אנא הפעל הרשאת 'הצגה מעל אפליקציות אחרות'");
-                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:" + getPackageName()));
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(intent);
+                showToast("נא לאפשר הצגה מעל אפליקציות");
+                Intent it = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:"+getPackageName()));
+                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(it);
             });
         }
     }
 
-    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        try {
-            if (event.getPackageName() == null) {
-                return;
-            }
-
-            String packageName = event.getPackageName().toString();
-            Log.d(TAG, "Received event from package: " + packageName);
-
-            // Enhanced WhatsApp package detection
-            if (!WhatsAppUtils.isWhatsAppPackage(packageName)) {
-                // If not WhatsApp, hide overlay if it's shown
-                if (overlayManager.isShown()) {
-                    Log.d(TAG, "Hiding overlay for non-WhatsApp package");
-                    overlayManager.hide();
-                }
-                return;
-            }
-
-            // Log the detected WhatsApp package
-            Log.d(TAG, "Detected WhatsApp package: " + packageName);
-
-            int eventType = event.getEventType();
-            Log.d(TAG, "Received WhatsApp event: " + eventType + " (package: " + packageName + ")");
-
-            // Check if we need to throttle events
-            long currentTime = System.currentTimeMillis();
-            if (currentTime - lastOverlayCheck < 200) {
-                return;
-            }
-            lastOverlayCheck = currentTime;
-
-            if (!Settings.canDrawOverlays(this)) {
-                Log.d(TAG, "Overlay permission not granted");
-                return;
-            }
-
-            // Enhanced selection detection
-            if (currentTime - lastSelectionCheckTime > SELECTION_CHECK_INTERVAL) {
-                lastSelectionCheckTime = currentTime;
-
-                // These are events that indicate user selection or interaction
-                boolean isSelectionEvent = (
-                        eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
-                        eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
-                        eventType == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ||
-                        eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED ||
-                        eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ||
-                        eventType == AccessibilityEvent.TYPE_VIEW_CONTEXT_CLICKED ||
-                        eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-                        eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
-                        eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED ||
-                        eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
-                );
-
-                if (isSelectionEvent) {
-                    Log.d(TAG, "Selection-related event detected: " + eventType);
-                    captureSelectedText();
-                }
-            }
-
-            AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-            if (rootNode == null) {
-                Log.d(TAG, "Root node is null");
-                return;
-            }
-
-            try {
-                // Enhanced WhatsApp state detection
-                boolean isChatWindow = WhatsAppUtils.isInWhatsAppChat(rootNode);
-                Log.d(TAG, "Is in WhatsApp chat: " + isChatWindow);
-
-                if (isChatWindow) {
-                    if (!overlayManager.isShown()) {
-                        Log.d(TAG, "In WhatsApp chat window, showing overlay buttons");
-                        showEncryptAndDecryptButtons();
-                    }
-                } else if (overlayManager.isShown()) {
-                    Log.d(TAG, "Not in WhatsApp chat window, hiding overlay buttons");
-                    overlayManager.hide();
-                }
-            } finally {
-                rootNode.recycle();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error in onAccessibilityEvent: ", e);
-        }
-    }
-
-    // New method to capture selected text
-    private void captureSelectedText() {
-        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-        if (rootNode != null) {
-            try {
-                String selectedText = WhatsAppUtils.getSelectedMessage(rootNode);
-                if (selectedText != null && !selectedText.isEmpty()) {
-                    Log.d(TAG, "New selected text detected: " + selectedText);
-
-                    // Add to our tracked messages if it's not already in the list
-                    if (!selectedMessages.contains(selectedText)) {
-                        selectedMessages.add(selectedText);
-
-                        // Keep only the MAX_TRACKED_MESSAGES most recent messages
-                        if (selectedMessages.size() > MAX_TRACKED_MESSAGES) {
-                            selectedMessages.remove(0);
-                        }
-
-                        Log.d(TAG, "Added to selected messages. Current count: " + selectedMessages.size());
-                    }
-
-                    lastSelectionTimestamp = System.currentTimeMillis();
-                }
-            } finally {
-                rootNode.recycle();
-            }
-        }
-    }
-
-    private void handleWhatsAppState(AccessibilityNodeInfo rootNode) {
-        boolean isChatWindow = WhatsAppUtils.isInWhatsAppChat(rootNode);
-        Log.d(TAG, "Is in WhatsApp chat: " + isChatWindow);
-
-        if (isChatWindow) {
-            if (!overlayManager.isShown()) {
-                Log.d(TAG, "In WhatsApp chat window, showing overlay buttons");
-                showEncryptAndDecryptButtons();
-            }
-        } else if (overlayManager.isShown()) {
-            Log.d(TAG, "Not in WhatsApp chat window, hiding overlay buttons");
-            overlayManager.hide();
-        }
-    }
-
-    private void showEncryptAndDecryptButtons() {
-        Log.d(TAG, "Showing encrypt and decrypt buttons");
-        overlayManager.show(
-                v -> showEncryptionDialog(getMessageText()),
-                v -> overlayManager.hide(),
-                v -> {
-                    // Improved handling of decrypt action
-                    overlayManager.hide();
-
-                    // When decrypt button is clicked, first try to get a fresh selection
-                    captureSelectedText();
-
-                    // If we have tracked messages, use those for decryption
-                    if (!selectedMessages.isEmpty()) {
-                        Log.d(TAG, "Using selected messages for decrypt. Count: " + selectedMessages.size());
-                        showDecryptionDialog(selectedMessages);
-                    } else {
-                        showToast("בחר הודעה לפיענוח");
-                    }
-                }
-        );
-    }
-
-    private String getMessageText() {
-        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-        if (rootNode != null) {
-            try {
-                return WhatsAppUtils.getWhatsAppInputText(rootNode);
-            } finally {
-                rootNode.recycle();
-            }
-        }
-        return "";
-    }
-
-    private String getSelectedText() {
-        // Improved method to get the user-selected text
-        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-        String selectedMessage = null;
-
-        if (rootNode != null) {
-            try {
-                // First try to get a fresh selection from the screen
-                selectedMessage = WhatsAppUtils.getSelectedMessage(rootNode);
-                if (selectedMessage != null && !selectedMessage.isEmpty()) {
-                    Log.d(TAG, "Found fresh selected message: " + selectedMessage);
-                    // Add to our tracked list
-                    if (!selectedMessages.contains(selectedMessage)) {
-                        selectedMessages.add(selectedMessage);
-                        if (selectedMessages.size() > MAX_TRACKED_MESSAGES) {
-                            selectedMessages.remove(0);
-                        }
-                    }
-                    lastSelectionTimestamp = System.currentTimeMillis();
-                    return selectedMessage;
-                }
-            } finally {
-                rootNode.recycle();
-            }
-        }
-
-        // If we couldn't get a fresh selection, use our tracked messages if they exist
-        if (!selectedMessages.isEmpty()) {
-            Log.d(TAG, "Using most recent tracked message: " + selectedMessages.get(selectedMessages.size() - 1));
-            return selectedMessages.get(selectedMessages.size() - 1);
-        }
-
-        return "";
-    }
-
-    private void showEncryptionDialog(String originalMessage) {
-        // Dismiss any existing dialog to prevent multiple dialogs
-        dismissActiveDialog();
-        overlayManager.hide();
-
-        try {
-            AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Light_Dialog_Alert);
-            View dialogView = LayoutInflater.from(this).inflate(R.layout.encryption_dialog, null);
-            builder.setView(dialogView);
-
-            final EditText messageInput = dialogView.findViewById(R.id.dialogMessageInput);
-            messageInput.setText(originalMessage);
-
-            Button encryptButton = dialogView.findViewById(R.id.dialogEncryptButton);
-            Button cancelButton = dialogView.findViewById(R.id.dialogCancelButton);
-
-            final AlertDialog dialog = builder.create();
-            dialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
-            dialog.setCancelable(false);
-
-            encryptButton.setOnClickListener(v -> handleEncryption(messageInput.getText().toString(), dialog));
-            cancelButton.setOnClickListener(v -> {
-                dialog.dismiss();
-                activeDialog = null;
-            });
-
-            dialog.show();
-            activeDialog = dialog;
-        } catch (Exception e) {
-            Log.e(TAG, "Error showing encryption dialog: ", e);
-            showToast("שגיאה בהצגת החלון: " + e.getMessage());
-        }
-    }
-
-    private void handleEncryption(String message, AlertDialog dialog) {
-        if (message.isEmpty()) {
-            showToast("יש להזין הודעה להצפנה");
-            return;
-        }
-
-        try {
-            String personalCode = getSharedPreferences(PREF_NAME, MODE_PRIVATE)
-                    .getString(PERSONAL_CODE_PREF, "");
-
-            if (personalCode.isEmpty()) {
-                showToast("נא להגדיר קוד אישי בהגדרות");
-                return;
-            }
-
-            boolean success = keystorePlugin.saveEncryptedMessage(personalCode, message);
-
-            if (success) {
-                String encryptedText = generateFakeEncryptedText(message);
-                boolean replaced = replaceWhatsAppText(encryptedText);
-
-                if (!replaced) {
-                    TextInputUtils.copyToClipboard(this, encryptedText);
-                    showToast("הטקסט המוצפן הועתק ללוח, הדבק אותו בתיבת ההודעה");
-                }
-
-                showToast("ההודעה הוצפנה בהצלחה");
-            } else {
-                showToast("שגיאה בהצפנה");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error during encryption", e);
-            showToast("שגיאה בהצפנה: " + e.getMessage());
-        }
-
-        dialog.dismiss();
-        activeDialog = null;
-    }
-
-    private boolean replaceWhatsAppText(String newText) {
-        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-        if (rootNode == null) return false;
-
-        try {
-            Log.d(TAG, "Starting text replacement process with enhanced methods");
-
-            boolean success = TextInputUtils.performTextReplacement(this, rootNode, newText);
-
-            final Handler handler = new Handler(Looper.getMainLooper());
-            handler.postDelayed(() -> {
-                AccessibilityNodeInfo delayedRootNode = getRootInActiveWindow();
-                if (delayedRootNode != null) {
-                    try {
-                        TextInputUtils.performTextReplacement(this, delayedRootNode, newText);
-                    } finally {
-                        delayedRootNode.recycle();
-                    }
-                }
-            }, 500);
-
-            return success;
-        } finally {
-            rootNode.recycle();
-        }
-    }
-
-    private String generateFakeEncryptedText(String originalText) {
-        StringBuilder result = new StringBuilder();
+    private String generateFakeEncryptedText(int length) {
         String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        int length = originalText.length() * 2;
-
-        for (int i = 0; i < length; i++) {
-            int index = (int) (Math.random() * chars.length());
-            result.append(chars.charAt(index));
-        }
-
-        return result.toString();
+        Random rnd = new Random();
+        StringBuilder sb = new StringBuilder(length);
+        for (int i=0; i<length; i++) sb.append(chars.charAt(rnd.nextInt(chars.length())));
+        return sb.toString();
     }
 
-    private void showToast(final String message) {
-        if (mainHandler != null) {
-            mainHandler.post(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
-        }
+    private void showToast(String msg) {
+        mainHandler.post(() -> Toast.makeText(this, msg, Toast.LENGTH_SHORT).show());
     }
 
-    @Override
-    public void onInterrupt() {
-        Log.d(TAG, "onInterrupt");
+    private int dpToPx(int dp) {
+        return Math.round(dp * getResources().getDisplayMetrics().density);
     }
 
-    @Override
-    public void onServiceConnected() {
-        super.onServiceConnected();
-        Log.d(TAG, "onServiceConnected");
-
-        try {
-            showToast("שירות הנגישות להצפנת הודעות הופעל");
-
-            AccessibilityServiceInfo info = getServiceInfo();
-            if (info == null) {
-                info = new AccessibilityServiceInfo();
-            }
-
-            // הגדרת חבילות המטרה כדי לכלול את כל גרסאות WhatsApp האפשריות
-            info.packageNames = whatsappPackages.toArray(new String[0]);
-
-            info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK;
-            info.feedbackType = AccessibilityServiceInfo.FEEDBACK_ALL_MASK;
-            info.notificationTimeout = 50;
-            info.flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
-                    AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS |
-                    AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS |
-                    AccessibilityServiceInfo.FLAG_REQUEST_ENHANCED_WEB_ACCESSIBILITY |
-                    AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE;
-
-            setServiceInfo(info);
-            checkOverlayPermission();
-
-            // Initial check for WhatsApp after a short delay
-            new Handler().postDelayed(() -> {
-                AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-                if (rootNode != null) {
-                    try {
-                        boolean isChatWindow = WhatsAppUtils.isInWhatsAppChat(rootNode);
-                        Log.d(TAG, "Initial WhatsApp check - Is in chat: " + isChatWindow);
-                        if (isChatWindow) {
-                            showEncryptAndDecryptButtons();
-                        }
-                    } finally {
-                        rootNode.recycle();
-                    }
-                }
-            }, 1000);
-        } catch (Exception e) {
-            Log.e(TAG, "Error in onServiceConnected: ", e);
-            showToast("שגיאה באתחול שירות הנגישות: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public void onDestroy() {
-        try {
-            dismissActiveDialog();
-            overlayManager.hide();
-            Log.d(TAG, "Service destroyed successfully");
-        } catch (Exception e) {
-            Log.e(TAG, "Error in onDestroy: ", e);
-        }
-        super.onDestroy();
-    }
-
-    // Helper method to dismiss any active dialog
-    private void dismissActiveDialog() {
-        if (activeDialog != null && activeDialog.isShowing()) {
-            try {
-                activeDialog.dismiss();
-            } catch (Exception e) {
-                Log.e(TAG, "Error dismissing active dialog", e);
-            }
-            activeDialog = null;
-        }
-    }
-
-    private void showDecryptionDialog(ArrayList<String> messages) {
-        try {
-            // Always hide overlay when showing the dialog
-            dismissActiveDialog();
-            overlayManager.hide();
-
-            Log.d(TAG, "Starting to show decryption dialog for " + messages.size() + " messages");
-
-            // Use the first message as the primary one
-            String primaryMessage = messages.isEmpty() ? "" : messages.get(messages.size() - 1);
-
-            AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Light_Dialog_Alert);
-            View dialogView = LayoutInflater.from(this).inflate(R.layout.personal_code_dialog, null);
-            builder.setView(dialogView);
-
-            TextView decryptedMessageText = dialogView.findViewById(R.id.decryptedMessageText);
-            EditText personalCodeInput = dialogView.findViewById(R.id.personalCodeDialogInput);
-            Button confirmButton = dialogView.findViewById(R.id.personalCodeConfirmButton);
-            Button cancelButton = dialogView.findViewById(R.id.personalCodeCancelButton);
-
-
-            if (decryptedMessageText != null) {
-                decryptedMessageText.setText("");
-                decryptedMessageText.setVisibility(View.GONE);
-            }
-
-            // Do NOT pre-fill the code to force manual entry each time
-            if (personalCodeInput != null) {
-                personalCodeInput.setText("");
-                // Request focus on the input field
-                personalCodeInput.requestFocus();
-            }
-
-            final AlertDialog dialog = builder.create();
-            dialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
-            dialog.setCancelable(false);
-
-            confirmButton.setOnClickListener(v -> {
-                String personalCode = personalCodeInput.getText().toString();
-                if (personalCode.length() != 4) {
-                    showToast("הקוד האישי חייב להיות 4 ספרות");
-                    return;
-                }
-
-                try {
-                    String decryptedMessage = keystorePlugin.getDecryptedMessage(personalCode);
-                    if (decryptedMessage != null) {
-                        decryptedMessageText.setText(decryptedMessage);
-                        decryptedMessageText.setVisibility(View.VISIBLE);
-                        showToast("ההודעה פוענחה בהצלחה");
-                    } else {
-                        showToast("לא נמצאה הודעה מוצפנת עם הקוד שהוזן");
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error decrypting message", e);
-                    showToast("שגיאה בפענוח ההודעה");
-                }
-            });
-
-            cancelButton.setOnClickListener(v -> {
-                dialog.dismiss();
-                activeDialog = null;
-            });
-
-            dialog.show();
-            activeDialog = dialog;
-
-            Log.d(TAG, "Decryption dialog shown for " + messages.size() + " messages");
-        } catch (Exception e) {
-            Log.e(TAG, "Error showing decryption dialog", e);
-            showToast("שגיאה בהצגת חלון הפענוח: " + e.getMessage());
-        }
-    }
-
-    private void showDecryptionDialog(String encryptedText) {
-        // Convert single message to an ArrayList and use the multiple message version
-        ArrayList<String> messages = new ArrayList<>();
-        messages.add(encryptedText);
-        showDecryptionDialog(messages);
+    private int mmToPx(float mm) {
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        return Math.round(mm * dm.xdpi/25.4f);
     }
 }

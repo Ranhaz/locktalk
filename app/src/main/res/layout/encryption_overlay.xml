@@ -9,26 +9,28 @@
     android:layout_margin="4dp"
     android:gravity="center">
 
-    <ImageButton
-        android:id="@+id/overlayEncryptButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:background="#00094E"
-        android:contentDescription="הצפן"
-        android:padding="8dp"
-        android:scaleType="centerInside"
-        android:src="@drawable/ic_lock_closed" />
 
     <ImageButton
         android:id="@+id/overlayDecryptButton"
         android:layout_width="40dp"
         android:layout_height="40dp"
-        android:src="@drawable/ic_lock_open"
-        android:background="#21572F"
         android:layout_marginStart="12dp"
+        android:background="#21572F"
         android:contentDescription="פענח"
+        android:padding="8dp"
         android:scaleType="centerInside"
-        android:padding="8dp"/>
+        android:src="@drawable/ic_lock_open" />
+
+    <TextView
+        android:id="@+id/overlayTimer"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_marginStart="8dp"
+        android:gravity="center_vertical"
+        android:textColor="#000"
+        android:textSize="14sp"
+        android:visibility="gone"
+        android:text="00:00"/>
 
     <ImageButton
         android:id="@+id/overlayCloseButton"
@@ -40,5 +42,6 @@
         android:contentDescription="סגור"
         android:scaleType="centerInside"
         android:padding="8dp"/>
+
 
 </LinearLayout>
