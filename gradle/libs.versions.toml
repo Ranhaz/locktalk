@@ -20,6 +20,7 @@ firebaseFirestore = "25.1.3"
 firebaseAuthKtx = "23.2.0"
 securityCrypto = "1.0.0"
 securityCryptoVersion = "1.1.0-alpha03"
+firebaseCrashlyticsBuildtools = "3.0.3"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -49,6 +50,7 @@ firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore
 firebase-auth-ktx = { group = "com.google.firebase", name = "firebase-auth-ktx", version.ref = "firebaseAuthKtx" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 material-v1110 = { module = "com.google.android.material:material", version.ref = "materialVersion" }
+firebase-crashlytics-buildtools = { group = "com.google.firebase", name = "firebase-crashlytics-buildtools", version.ref = "firebaseCrashlyticsBuildtools" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

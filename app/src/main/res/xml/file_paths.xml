@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- אם אתה שומר ב־cache/images -->
+    <cache-path
+        name="cache_images"
+        path="images/" />
+    <!-- כבר היה לך כנראה external-files-path או משהו כזה -->
+    <external-files-path name="ext_files" path="." />
+</paths>

@@ -1,12 +1,15 @@
 package com.example.locktalk_01.activities;
 
+import android.annotation.SuppressLint;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.util.Log;
-import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.Toast;
@@ -15,6 +18,8 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.locktalk_01.R;
+import com.example.locktalk_01.activities.AccessibilityManager;
+import com.example.locktalk_01.managers.OverlayManager;
 
 import java.util.Arrays;
 import java.util.List;
@@ -25,21 +30,31 @@ public class EncryptionActivity extends AppCompatActivity {
     private static final String PREF_NAME = "UserCredentials";
 
     private EditText personalCodeInput;
-    private Button   savePersonalCodeButton;
-    private Button   openWhatsAppButton;
-    private Button   logoutButton;
+    private Button savePersonalCodeButton;
+    private Button openWhatsAppButton;
+    private Button logoutButton;
 
-    private AccessibilityManager accessibilityManager;   //  עטיפה פנימית שלך
+    private AccessibilityManager accessibilityManager;
+    private OverlayManager overlayManager;
 
-    /* --------------- lifecycle --------------- */
+    public static final int REQ_IMG = OverlayManager.REQ_IMG;
 
+    private final BroadcastReceiver pickReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context ctx, Intent intent) {
+            Intent pick = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+            pick.setType("image/*");
+            startActivityForResult(pick, REQ_IMG);
+        }
+    };
+
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         accessibilityManager = new AccessibilityManager(this);
 
-        //-- הרשאות נגישות ו-Login --//
         if (!accessibilityManager.isAccessibilityServiceEnabled()) {
             startActivity(new Intent(this, AccessibilityActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
@@ -54,21 +69,28 @@ public class EncryptionActivity extends AppCompatActivity {
         }
 
         setContentView(R.layout.activity_encryption);
+
+        registerReceiver(pickReceiver, new IntentFilter("com.example.ACTION_PICK_IMAGE"));
         initViews();
         loadPersonalCode();
+
+        overlayManager = new OverlayManager(this);
+        overlayManager.showOverlay(
+                v -> Toast.makeText(this, "Encrypt clicked", Toast.LENGTH_SHORT).show(),
+                v -> overlayManager.hideOverlay(),
+                v -> Toast.makeText(this, "Decrypt clicked", Toast.LENGTH_SHORT).show()
+        );
     }
 
-    /* --------------- UI helpers --------------- */
-
     private void initViews() {
-        personalCodeInput      = findViewById(R.id.personalCodeInput);
+        personalCodeInput = findViewById(R.id.personalCodeInput);
         savePersonalCodeButton = findViewById(R.id.savePersonalCodeButton);
-        openWhatsAppButton     = findViewById(R.id.openWhatsAppButton);
-        logoutButton           = findViewById(R.id.logoutButton);
+        openWhatsAppButton = findViewById(R.id.openWhatsAppButton);
+        logoutButton = findViewById(R.id.logoutButton);
 
         savePersonalCodeButton.setOnClickListener(v -> savePersonalCode());
-        openWhatsAppButton   .setOnClickListener(v -> openWhatsApp());
-        logoutButton         .setOnClickListener(v -> doLogout());
+        openWhatsAppButton.setOnClickListener(v -> openWhatsApp());
+        logoutButton.setOnClickListener(v -> doLogout());
     }
 
     private void loadPersonalCode() {
@@ -98,11 +120,9 @@ public class EncryptionActivity extends AppCompatActivity {
         finish();
     }
 
-    /* --------------- WhatsApp launcher --------------- */
-
     private static final List<String> WA_PACKAGES = Arrays.asList(
-            "com.whatsapp",          // official
-            "com.whatsapp.w4b",      // business
+            "com.whatsapp",
+            "com.whatsapp.w4b",
             "com.gbwhatsapp",
             "com.whatsapp.plus",
             "com.yowhatsapp",
@@ -156,14 +176,12 @@ public class EncryptionActivity extends AppCompatActivity {
         new AlertDialog.Builder(this)
                 .setTitle("WhatsApp לא נמצא")
                 .setMessage("לא נמצאה התקנת WhatsApp במכשיר. האם תרצה להתקין?")
-                .setPositiveButton("כן", (d,w)->
+                .setPositiveButton("כן", (d, w) ->
                         startActivity(new Intent(Intent.ACTION_VIEW,
                                 Uri.parse("market://details?id=com.whatsapp"))))
                 .setNegativeButton("לא", null)
                 .show();
     }
-
-    /* --------------- misc --------------- */
 
     @Override
     protected void onResume() {
@@ -178,7 +196,14 @@ public class EncryptionActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        unregisterReceiver(pickReceiver);
         accessibilityManager.setLoggedIn(false);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        overlayManager.handlePickerResult(requestCode, resultCode, data);
     }
 
     private void toast(String t) {

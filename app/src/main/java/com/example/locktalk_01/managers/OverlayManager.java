@@ -1,234 +1,207 @@
 package com.example.locktalk_01.managers;
 
-import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.ClipData;
 import android.content.Context;
+import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
+import android.util.Base64;
 import android.util.Log;
+import android.view.ContextThemeWrapper;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.ImageButton;
-import android.widget.TextView;
-
+import android.widget.ImageView;
+import androidx.core.content.FileProvider;
 import com.example.locktalk_01.R;
+import com.example.locktalk_01.services.MyAccessibilityService;
+import com.example.locktalk_01.utils.EncryptionUtils;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 
 public class OverlayManager {
-    private static final String TAG = "OverlayManager";
+    public static final int REQ_IMG = 3001;
 
-    private final WindowManager wm;
     private final Context ctx;
-    private View mainOverlay;
-    private WindowManager.LayoutParams mainLp;
-    private boolean mainShown = false;
+    private final Activity activity;
+    private final WindowManager wm;
+    private View overlay;
+    private WindowManager.LayoutParams lp;
+    private int lastX, lastY;
 
-    private ImageButton bDec, bCls;
-    private TextView timerView;
-    private View.OnClickListener originalCloseListener;
-
-    private final List<View> decryptOverlays = new ArrayList<>();
-
-    // גרירה
-    private int initX, initY;
-    private float touchX, touchY;
-    private int lastAction;
-
-    // טיימר
-    private final Handler timerHandler = new Handler(Looper.getMainLooper());
-    private Runnable timerRunnable;
-
-    public OverlayManager(Context c, WindowManager w) {
-        this.ctx = c.getApplicationContext();
-        this.wm = w;
+    public OverlayManager(Activity activity) {
+        this.activity = activity;
+        this.ctx = activity;
+        this.wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
     }
 
-    /** משנה מיקום של ה־overlay הראשי */
-    public void updatePosition(int x, int y) {
-        if (mainOverlay != null && mainLp != null) {
-            mainLp.x = x;
-            mainLp.y = y;
-            wm.updateViewLayout(mainOverlay, mainLp);
-        }
+    public OverlayManager(MyAccessibilityService svc) {
+        this.activity = null;
+        this.ctx = svc;
+        this.wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
     }
 
-    /** מציג את ה־overlay הראשי עם כפתורי Enc/Close/Dec */
-    @SuppressLint("ClickableViewAccessibility")
-    public void show(
-            View.OnClickListener enc,
-            View.OnClickListener close,
-            View.OnClickListener dec
-    ) {
-        if (mainShown) {
-            // רק מעדכנים listeners
-            if (bDec != null) bDec.setOnClickListener(dec);
-            originalCloseListener = close;
-            if (bCls != null) bCls.setOnClickListener(close);
-            return;
-        }
+    /**
+     * מציג את כפתורי ה־Overlay.
+     * מאפשר לחיצה מחוץ לחלון (למשל כפתור Send בוואטסאפ).
+     */
+    public void showOverlay(View.OnClickListener pickClick,
+                            View.OnClickListener closeClick,
+                            View.OnClickListener decryptClick) {
+        if (overlay != null) return;
 
-        mainLp = new WindowManager.LayoutParams(
+        // בואו נשתמש ב־AppCompat Theme
+        Context themeCtx = new ContextThemeWrapper(ctx, R.style.AppTheme);
+        overlay = LayoutInflater.from(themeCtx)
+                .inflate(R.layout.overlay_controls, null);
+
+        int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+
+        lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        : WindowManager.LayoutParams.TYPE_PHONE,
+                type,
+                // כאן החלפנו: FLAG_NOT_TOUCH_MODAL כדי להעביר לחיצות מחוץ לחלון הלאה
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
         );
-        mainLp.gravity = Gravity.TOP | Gravity.START;
-        // ערכים התחלתיים; יתוקנו מיידית ע"י updatePosition(...)
-        mainLp.x = 0;
-        mainLp.y = 0;
+        lp.gravity = Gravity.TOP | Gravity.START;
+        lp.x = 100;
+        lp.y = 200;
 
-        mainOverlay = LayoutInflater.from(ctx)
-                .inflate(R.layout.encryption_overlay, null);
-
-        bDec      = mainOverlay.findViewById(R.id.overlayDecryptButton);
-        bCls      = mainOverlay.findViewById(R.id.overlayCloseButton);
-        timerView = mainOverlay.findViewById(R.id.overlayTimer);
-
-        // אתחול ויזיביליטי
-        timerView.setVisibility(View.GONE);
-        bCls.setVisibility(View.GONE);
-
-        bDec.setOnClickListener(dec);
-        originalCloseListener = close;
-        bCls.setOnClickListener(close);
-
-        // גרירה
-        mainOverlay.setOnTouchListener((v, e) -> {
-            if (v instanceof ImageButton) return false;
+        // גרירה של ה־Overlay
+        overlay.setOnTouchListener((v, e) -> {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    lastAction = e.getActionMasked();
-                    initX = mainLp.x;
-                    initY = mainLp.y;
-                    touchX = e.getRawX();
-                    touchY = e.getRawY();
+                    lastX = (int) e.getRawX();
+                    lastY = (int) e.getRawY();
                     return true;
                 case MotionEvent.ACTION_MOVE:
-                    lastAction = e.getActionMasked();
-                    mainLp.x = initX + (int)(e.getRawX() - touchX);
-                    mainLp.y = initY + (int)(e.getRawY() - touchY);
-                    wm.updateViewLayout(mainOverlay, mainLp);
+                    lp.x += (int) e.getRawX() - lastX;
+                    lp.y += (int) e.getRawY() - lastY;
+                    wm.updateViewLayout(overlay, lp);
+                    lastX = (int) e.getRawX();
+                    lastY = (int) e.getRawY();
                     return true;
-                case MotionEvent.ACTION_UP:
-                    return lastAction != MotionEvent.ACTION_DOWN;
             }
             return false;
         });
 
-        wm.addView(mainOverlay, mainLp);
-        mainShown = true;
-        Log.d(TAG, "main overlay shown");
+        overlay.findViewById(R.id.overlaySelectImageButton)
+                .setOnClickListener(pickClick);
+        overlay.findViewById(R.id.overlayDecryptButton)
+                .setOnClickListener(decryptClick);
+        overlay.findViewById(R.id.overlayCloseButton)
+                .setOnClickListener(closeClick);
+
+        wm.addView(overlay, lp);
+    }
+
+    /** מסתיר את ה־Overlay */
+    public void hideOverlay() {
+        if (overlay != null) {
+            wm.removeView(overlay);
+            overlay = null;
+        }
+    }
+
+    /** האם כרגע מוצג Overlay? */
+    public boolean isShown() {
+        return overlay != null;
     }
 
     /**
-     * מפעיל טיימר עד expiryTimeMillis, מציג את השעון במקום decrypt Button,
-     * וב־Close מטפל בביטול cancelCallback + stopTimer().
+     * מציג בועה עם תמונה מפוענחת למשך כמה שניות.
      */
-    public void startTimer(long expiryTimeMillis, Runnable cancelCallback) {
-        if (timerRunnable != null) {
-            timerHandler.removeCallbacks(timerRunnable);
-        }
+    public void showOverlayImage(Bitmap bmp, Rect bounds) {
+        ImageView iv = new ImageView(ctx);
+        iv.setImageBitmap(bmp);
 
-        timerView.setVisibility(View.VISIBLE);
-        bDec.setVisibility(View.GONE);
-        bCls.setVisibility(View.VISIBLE);
-        bCls.setOnClickListener(v -> {
-            cancelCallback.run();
-            stopTimer();
-        });
+        int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
 
-        timerRunnable = new Runnable() {
-            @Override
-            public void run() {
-                long rem = expiryTimeMillis - System.currentTimeMillis();
-                if (rem > 0) {
-                    int sec = (int)(rem / 1000);
-                    int m = sec / 60, s = sec % 60;
-                    timerView.setText(String.format(Locale.getDefault(),
-                            "%02d:%02d", m, s));
-                    timerHandler.postDelayed(this, 1000);
-                } else {
-                    cancelCallback.run();
-                    stopTimer();
-                    clearDecryptOverlays();
-                }
-            }
-        };
-        timerHandler.post(timerRunnable);
-    }
-
-    /** עוצר את הטיימר, מחביא שעון, מחזיר decrypt+ close למצבם המקורי */
-    public void stopTimer() {
-        if (timerRunnable != null) {
-            timerHandler.removeCallbacks(timerRunnable);
-            timerRunnable = null;
-        }
-        timerView.setVisibility(View.GONE);
-        bDec.setVisibility(View.VISIBLE);
-        bCls.setVisibility(View.GONE);
-        // משחזרים את ה־close listener המקורי
-        if (originalCloseListener != null) {
-            bCls.setOnClickListener(originalCloseListener);
-        }
-    }
-
-    /** מוחק את כל בועות הפיענוח */
-    public void clearDecryptOverlays() {
-        for (View v : decryptOverlays) {
-            try { wm.removeView(v); } catch(Exception ignored){}
-        }
-        decryptOverlays.clear();
-    }
-
-    /** סוגר את כל ה־overlay (כולל טיימר ובועות) */
-    public void hide() {
-        stopTimer();
-        clearDecryptOverlays();
-        if (mainOverlay != null && mainShown) {
-            try { wm.removeView(mainOverlay); } catch(Exception ignored){}
-            mainOverlay = null;
-            mainShown   = false;
-            Log.d(TAG, "main overlay hidden");
-        }
-    }
-
-    public boolean isShown() {
-        return mainShown;
-    }
-
-    /** בועת פיענוח מתחת לבועה המקורית */
-    public void showDecryptedOverlay(String text, Rect bounds) {
-        View bubble = LayoutInflater.from(ctx)
-                .inflate(R.layout.decrypt_overlay, null);
-        TextView tv = bubble.findViewById(R.id.decrypt_overlay_text);
-        tv.setText(text);
-
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams(
                 bounds.width(), bounds.height(),
-                bounds.left, bounds.top,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        : WindowManager.LayoutParams.TYPE_PHONE,
+                type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
         );
-        lp.gravity = Gravity.TOP | Gravity.START;
-        wm.addView(bubble, lp);
-        decryptOverlays.add(bubble);
+        p.gravity = Gravity.TOP | Gravity.START;
+        p.x = bounds.left;
+        p.y = bounds.top;
+
+        wm.addView(iv, p);
+
+        // הסרה אוטומטית אחרי 5 שניות
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                wm.removeView(iv);
+            } catch (Exception ignored) {}
+        }, 5000);
     }
+
+    /**
+     * מטפל בתוצאה של בחירת תמונה:
+     * 1) מפעיל פילטר הצפנה
+     * 2) שומר את הקובץ ומוסיף EXIF עם ה־base64
+     * 3) שולח לוואטסאפ
+     */
+    public void handlePickerResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode != REQ_IMG
+                || resultCode != Activity.RESULT_OK
+                || data == null
+                || data.getData() == null) {
+            return;
+        }
+
+        try {
+            // קבלת ה-Bitmap המקורי
+            Uri picked = data.getData();
+            Bitmap orig = MediaStore.Images.Media.getBitmap(ctx.getContentResolver(), picked);
+
+            // הצפנה ויזואלית
+            Bitmap encrypted = EncryptionUtils.applyEncryptionFilter(orig);
+
+            // שמירה והפקת URI חוקי
+            Uri shareUri = EncryptionUtils.saveBitmap(ctx, encrypted);
+
+            // בניית Intent שיתוף
+            Intent share = new Intent(Intent.ACTION_SEND)
+                    .setType("image/jpeg")
+                    .putExtra(Intent.EXTRA_STREAM, shareUri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            // במידה ושמנו את lastWhatsAppPackage
+            MyAccessibilityService svc = MyAccessibilityService.getInstance();
+            String waPkg = svc != null ? svc.getLastWhatsAppPackage() : null;
+            if (waPkg != null) {
+                share.setPackage(waPkg);
+                // תן ל־WhatsApp הרשאת קריאה ל-URI
+                ctx.grantUriPermission(waPkg, shareUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+
+            // הפעלת ה-Activity
+            ctx.startActivity(share);
+
+        } catch (IOException e) {
+            Log.e("OverlayMgr", "image pick failed", e);
+        }
+    }
+
 }

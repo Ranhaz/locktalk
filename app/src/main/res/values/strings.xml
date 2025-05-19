@@ -17,7 +17,13 @@
     <string name="whatsapp_not_installed">וואטסאפ אינו מותקן</string>
     <string name="opening_whatsapp">פותח את וואטסאפ...</string>
     <string name="usage_instructions">כיצד להשתמש:\n1. לחץ על הכפתור למעלה כדי להפעיל את שירות הנגישות\n2. בהגדרות הנגישות, מצא את \"Whisper Weave\"\n3. הפעל את השירות וחזור לאפליקציה\n4. פתח את וואטסאפ - הודעות יוצפנו אוטומטית</string>
+    <!-- Overlay control icons -->
+    <string name="desc_select_image">Select image to encrypt</string>
+    <string name="desc_decrypt">Decrypt messages or images</string>
+    <string name="desc_close_overlay">Close overlay</string>
 
+    <!-- Decrypted image overlay -->
+    <string name="desc_close_image_overlay">Close decrypted image</string>
     <!-- New strings for PIN dialog -->
     <string name="enter_pin">הכנס קוד PIN</string>
     <string name="enter_pin_title">הכנס קוד אישי</string>
