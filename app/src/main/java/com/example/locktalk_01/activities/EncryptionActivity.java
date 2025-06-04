@@ -136,6 +136,7 @@ public class EncryptionActivity extends AppCompatActivity {
         showInstallDialog();
     }
 
+
     private boolean tryDirectPackageOpen() {
         PackageManager pm = getPackageManager();
         for (String pkg : WA_PACKAGES) {
@@ -171,6 +172,7 @@ public class EncryptionActivity extends AppCompatActivity {
         }
         return false;
     }
+
 
     private void showInstallDialog() {
         new AlertDialog.Builder(this)

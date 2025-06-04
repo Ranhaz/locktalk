@@ -4,6 +4,12 @@
         <item name="colorPrimaryDark">@android:color/holo_blue_light</item>
         <item name="colorAccent">@android:color/holo_green_light</item>
     </style>
+    <!-- styles.xml -->
+    <style name="Theme.TransparentOverlay" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 
     <style name="AlertDialogTheme">
         <item name="android:background">?android:attr/colorBackground</item>

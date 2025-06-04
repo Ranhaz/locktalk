@@ -10,24 +10,27 @@
         android:id="@+id/overlaySelectImageButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="בחר תמונה"
-        android:clickable="true"
-        android:focusable="true"/>
+        android:text="בחר תמונה" />
 
     <Button
         android:id="@+id/overlayDecryptButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="פענוח"
-        android:clickable="true"
-        android:focusable="true"/>
+        android:text="פענוח" />
+
+    <TextView
+        android:id="@+id/timerTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="00:00"
+        android:textSize="14sp"
+        android:layout_marginStart="8dp"
+        android:visibility="gone" />
 
     <Button
         android:id="@+id/overlayCloseButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="סגור"
-        android:clickable="true"
-        android:focusable="true"/>
+        android:text="סגור" />
 
 </LinearLayout>

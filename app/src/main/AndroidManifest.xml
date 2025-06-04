@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.example.locktalk_01">
 
-    <!-- Overlay permission -->
+    <!-- הרשאות להצגת overlay ולקריאת תמונות מגלריה -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- Gallery access -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- אנדרואיד 13+ -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
+
 
     <queries>
         <package android:name="com.whatsapp"/>
@@ -20,7 +23,13 @@
             <action android:name="android.intent.action.SEND"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND"/>
+            <data android:mimeType="image/*"/>
+        </intent>
+
     </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -29,50 +38,41 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.NoActionBar">
 
-
+        <!-- Splash / Launcher -->
         <activity
-            android:name=".activities.SplashActivity"
+            android:name="com.example.locktalk_01.activities.SplashActivity"
             android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"/>
-        </provider>
+        <activity android:name=".activities.DecryptImageActivity" />
 
+        <!-- שאר האקטיביטיס שלך -->
         <activity
-            android:name=".activities.LoginActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".activities.MainActivity"
+            android:name="com.example.locktalk_01.activities.MainActivity"
             android:exported="true" />
-
         <activity
-            android:name=".activities.AccessibilityActivity"
+            android:name="com.example.locktalk_01.activities.LoginActivity"
             android:exported="false" />
-
         <activity
-            android:name=".activities.EncryptionActivity"
+            android:name="com.example.locktalk_01.activities.AccessibilityActivity"
             android:exported="false" />
-
-        <!-- ה־Activity הפרוקסי לבחירת תמונה -->
+        <activity
+            android:name="com.example.locktalk_01.activities.EncryptionActivity"
+            android:exported="false" />
         <activity
             android:name=".activities.ImagePickerProxyActivity"
             android:exported="true"
-            android:theme="@style/Theme.AppCompat.NoActionBar" />
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.TransparentOverlay" />
 
-        <!-- השירות שלנו -->
+        <!-- שירות הנגישות -->
         <service
-            android:name=".services.MyAccessibilityService"
+            android:name="com.example.locktalk_01.services.MyAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -82,6 +82,15 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 </manifest>
