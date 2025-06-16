@@ -3,6 +3,8 @@
     <color name="colorPrimary">#6200EE</color>
     <color name="colorPrimaryDark">#3700B3</color>
     <color name="colorAccent">#03DAC5</color>
+    <color name="wa_bubble_out_green">#DCF8C6</color> <!-- זה הירוק של וואטסאפ -->
+    <color name="wa_bubble_in_white">#FFFFFFFF</color>
 
     <!-- צבעים עבור הרקע של האוברליי וההודעות -->
     <color name="overlayBackgroundColor">#80000000</color> <!-- צבע כהה מעט שקוף לאוברליי -->
@@ -15,6 +17,7 @@
     <!-- צבעים עבור הודעות מפוענחות -->
     <color name="decryptedMessageBackgroundColor">#4CAF50</color> <!-- רקע ירוק עבור הודעה מפוענחת -->
     <color name="decryptedMessageTextColor">#000000</color> <!-- טקסט שחור עבור הודעה מפוענחת -->
+    <color name="black">#000000</color>
 
     <!-- צבעים עבור דיאלוגים, כולל PIN -->
     <color name="pinDialogBackground">#FFFFFF</color> <!-- רקע לבן לדיאלוג ה-PIN -->

@@ -3,6 +3,7 @@ package com.example.locktalk_01.activities;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.provider.Settings;
+import android.util.Log;
 
 import com.example.locktalk_01.services.MyAccessibilityService;
 
@@ -35,11 +36,13 @@ public class AccessibilityManager {
     /*   Login flag handling                                */
     /* ---------------------------------------------------- */
     public boolean isUserLoggedIn() {
-        return prefs().getBoolean(KEY_LOGGED_IN, false);
+        boolean loggedIn = prefs().getBoolean(KEY_LOGGED_IN, false);
+        Log.d("AccessibilityManager", "isUserLoggedIn = " + loggedIn);
+        return loggedIn;
     }
 
-    /** Set <code>loggedIn</code> flag; called by LoginActivity & EncryptionActivity. */
     public void setLoggedIn(boolean v) {
+        Log.d("AccessibilityManager", "setLoggedIn = " + v);
         prefs().edit().putBoolean(KEY_LOGGED_IN, v).apply();
     }
 

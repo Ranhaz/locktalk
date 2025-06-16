@@ -1,54 +1,35 @@
 package com.example.locktalk_01.activities;
 
-import android.annotation.SuppressLint;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.MediaStore;
+import android.text.InputType;
 import android.util.Log;
+import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.locktalk_01.R;
-import com.example.locktalk_01.activities.AccessibilityManager;
-import com.example.locktalk_01.managers.OverlayManager;
 
 import java.util.Arrays;
 import java.util.List;
-
 public class EncryptionActivity extends AppCompatActivity {
 
     private static final String TAG = "EncryptionActivity";
     private static final String PREF_NAME = "UserCredentials";
+    private static final String PERSONAL_CODE_PREFIX = "personalCode_";
 
     private EditText personalCodeInput;
-    private Button savePersonalCodeButton;
-    private Button openWhatsAppButton;
-    private Button logoutButton;
-
+    private Button savePersonalCodeButton, openWhatsAppButton, logoutButton, resetPersonalCodeButton;
     private AccessibilityManager accessibilityManager;
-    private OverlayManager overlayManager;
 
-    public static final int REQ_IMG = OverlayManager.REQ_IMG;
-
-    private final BroadcastReceiver pickReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context ctx, Intent intent) {
-            Intent pick = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
-            pick.setType("image/*");
-            startActivityForResult(pick, REQ_IMG);
-        }
-    };
-
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -69,17 +50,8 @@ public class EncryptionActivity extends AppCompatActivity {
         }
 
         setContentView(R.layout.activity_encryption);
-
-        registerReceiver(pickReceiver, new IntentFilter("com.example.ACTION_PICK_IMAGE"));
         initViews();
         loadPersonalCode();
-
-        overlayManager = new OverlayManager(this);
-        overlayManager.showOverlay(
-                v -> Toast.makeText(this, "Encrypt clicked", Toast.LENGTH_SHORT).show(),
-                v -> overlayManager.hideOverlay(),
-                v -> Toast.makeText(this, "Decrypt clicked", Toast.LENGTH_SHORT).show()
-        );
     }
 
     private void initViews() {
@@ -88,15 +60,34 @@ public class EncryptionActivity extends AppCompatActivity {
         openWhatsAppButton = findViewById(R.id.openWhatsAppButton);
         logoutButton = findViewById(R.id.logoutButton);
 
+        // הוסף כפתור איפוס קוד אישי (אופציונלי, אם אין לך ב-xml)
+        resetPersonalCodeButton = new Button(this);
+        resetPersonalCodeButton.setText("איפוס קוד אישי");
+        ((LinearLayout) personalCodeInput.getParent()).addView(resetPersonalCodeButton, 3);
+
         savePersonalCodeButton.setOnClickListener(v -> savePersonalCode());
         openWhatsAppButton.setOnClickListener(v -> openWhatsApp());
         logoutButton.setOnClickListener(v -> doLogout());
+        resetPersonalCodeButton.setOnClickListener(v -> resetPersonalCodeFlow());
     }
 
     private void loadPersonalCode() {
-        String saved = getSharedPreferences(PREF_NAME, MODE_PRIVATE)
-                .getString("personalCode", "");
-        personalCodeInput.setText(saved);
+        SharedPreferences prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        String userPhone = prefs.getString("currentUserPhone", "");
+        String saved = prefs.getString(PERSONAL_CODE_PREFIX + userPhone, "");
+
+        if (!saved.isEmpty()) {
+            personalCodeInput.setText(saved);
+            personalCodeInput.setEnabled(false);
+            savePersonalCodeButton.setEnabled(false);
+            savePersonalCodeButton.setAlpha(0.5f);
+            resetPersonalCodeButton.setVisibility(View.VISIBLE);
+        } else {
+            personalCodeInput.setEnabled(true);
+            savePersonalCodeButton.setEnabled(true);
+            savePersonalCodeButton.setAlpha(1f);
+            resetPersonalCodeButton.setVisibility(View.GONE);
+        }
     }
 
     private void savePersonalCode() {
@@ -105,11 +96,62 @@ public class EncryptionActivity extends AppCompatActivity {
             toast("הקוד האישי חייב להיות 4 ספרות");
             return;
         }
-        getSharedPreferences(PREF_NAME, MODE_PRIVATE)
-                .edit()
+        SharedPreferences prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        String userPhone = prefs.getString("currentUserPhone", "");
+        String existing = prefs.getString(PERSONAL_CODE_PREFIX + userPhone, "");
+        if (!existing.isEmpty()) {
+            toast("לא ניתן לשנות קוד אישי. יש לבצע איפוס קודם.");
+            return;
+        }
+        prefs.edit()
+                .putString(PERSONAL_CODE_PREFIX + userPhone, code)
                 .putString("personalCode", code)
                 .apply();
+        personalCodeInput.setEnabled(false);
+        savePersonalCodeButton.setEnabled(false);
+        savePersonalCodeButton.setAlpha(0.5f);
+        resetPersonalCodeButton.setVisibility(View.VISIBLE);
         toast("הקוד האישי נשמר בהצלחה");
+    }
+    private void resetPersonalCodeFlow() {
+        new AlertDialog.Builder(this)
+                .setTitle("איפוס קוד אישי")
+                .setMessage("איפוס הקוד ימנע פיענוח של הודעות שהוצפנו עם הקוד הקודם. הודעות חדשות יפוענחו עם הקוד החדש בלבד.\n\nלהמשיך?")
+                .setPositiveButton("איפוס", (d, w) -> showNewCodeDialog())
+                .setNegativeButton("ביטול", null)
+                .show();
+    }
+
+    private void showNewCodeDialog() {
+        final EditText codeInput = new EditText(this);
+        codeInput.setHint("הכנס קוד אישי חדש (4 ספרות)");
+        codeInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+
+        new AlertDialog.Builder(this)
+                .setTitle("הגדרת קוד אישי חדש")
+                .setView(codeInput)
+                .setPositiveButton("שמור", (d, w) -> {
+                    String newCode = codeInput.getText().toString();
+                    if (!newCode.matches("\\d{4}")) {
+                        toast("הקוד האישי חייב להיות 4 ספרות");
+                        return;
+                    }
+                    SharedPreferences prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+                    String userPhone = prefs.getString("currentUserPhone", "");
+                    // מחיקה של הישן והגדרת קוד חדש
+                    prefs.edit()
+                            .putString(PERSONAL_CODE_PREFIX + userPhone, newCode)
+                            .putString("personalCode", newCode)
+                            .apply();
+                    personalCodeInput.setText(newCode);
+                    personalCodeInput.setEnabled(false);
+                    savePersonalCodeButton.setEnabled(false);
+                    savePersonalCodeButton.setAlpha(0.5f);
+                    resetPersonalCodeButton.setVisibility(View.VISIBLE);
+                    toast("הקוד אופס והוגדר קוד חדש. שימי לב: הודעות ישנות לא יתפענחו יותר.");
+                })
+                .setNegativeButton("ביטול", null)
+                .show();
     }
 
     private void doLogout() {
@@ -120,9 +162,11 @@ public class EncryptionActivity extends AppCompatActivity {
         finish();
     }
 
+    /* --------------- WhatsApp launcher --------------- */
+
     private static final List<String> WA_PACKAGES = Arrays.asList(
-            "com.whatsapp",
-            "com.whatsapp.w4b",
+            "com.whatsapp",          // official
+            "com.whatsapp.w4b",      // business
             "com.gbwhatsapp",
             "com.whatsapp.plus",
             "com.yowhatsapp",
@@ -178,12 +222,14 @@ public class EncryptionActivity extends AppCompatActivity {
         new AlertDialog.Builder(this)
                 .setTitle("WhatsApp לא נמצא")
                 .setMessage("לא נמצאה התקנת WhatsApp במכשיר. האם תרצה להתקין?")
-                .setPositiveButton("כן", (d, w) ->
+                .setPositiveButton("כן", (d,w)->
                         startActivity(new Intent(Intent.ACTION_VIEW,
                                 Uri.parse("market://details?id=com.whatsapp"))))
                 .setNegativeButton("לא", null)
                 .show();
     }
+
+    /* --------------- misc --------------- */
 
     @Override
     protected void onResume() {
@@ -198,14 +244,7 @@ public class EncryptionActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        unregisterReceiver(pickReceiver);
         accessibilityManager.setLoggedIn(false);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        overlayManager.handlePickerResult(requestCode, resultCode, data);
     }
 
     private void toast(String t) {

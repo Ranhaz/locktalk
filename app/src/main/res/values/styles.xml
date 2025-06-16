@@ -4,7 +4,7 @@
         <item name="colorPrimaryDark">@android:color/holo_blue_light</item>
         <item name="colorAccent">@android:color/holo_green_light</item>
     </style>
-    <!-- styles.xml -->
+
     <style name="Theme.TransparentOverlay" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
@@ -14,5 +14,11 @@
     <style name="AlertDialogTheme">
         <item name="android:background">?android:attr/colorBackground</item>
         <item name="android:textColor">?android:attr/textColorPrimary</item>
+    </style>
+
+    <style name="Theme.LockTalk" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
     </style>
 </resources>

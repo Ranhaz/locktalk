@@ -3,14 +3,22 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.example.locktalk_01">
 
-    <!-- הרשאות להצגת overlay ולקריאת תמונות מגלריה -->
+    <!-- הרשאות בסיסיות -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- אנדרואיד 13+ -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+
+    <!-- הרשאות לאחסון (לגרסאות ישנות) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
 
+    <!-- שימוש במצלמה – לא חובה שיהיה required! -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <queries>
+        <!-- WhatsApp נגזרות -->
         <package android:name="com.whatsapp"/>
         <package android:name="com.whatsapp.w4b"/>
         <package android:name="com.gbwhatsapp"/>
@@ -27,18 +35,17 @@
             <action android:name="android.intent.action.SEND"/>
             <data android:mimeType="image/*"/>
         </intent>
-
     </queries>
 
     <application
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/icon"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:roundIcon="@mipmap/icon_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.NoActionBar">
+        android:theme="@style/Theme.LockTalk">
 
-        <!-- Splash / Launcher -->
+        <!-- Splash / Launcher (רק הוא עם LAUNCHER) -->
         <activity
             android:name="com.example.locktalk_01.activities.SplashActivity"
             android:exported="true">
@@ -47,30 +54,26 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <activity android:name=".activities.DecryptImageActivity" />
 
-        <!-- שאר האקטיביטיס שלך -->
-        <activity
-            android:name="com.example.locktalk_01.activities.MainActivity"
+        <!-- כל שאר האקטיביטיז - בשם מלא -->
+        <activity android:name="com.example.locktalk_01.activities.EncryptionActivity" />
+        <activity android:name="com.example.locktalk_01.activities.DecryptImageActivity" />
+        <activity android:name="com.example.locktalk_01.activities.MainActivity"
             android:exported="true" />
-        <activity
-            android:name="com.example.locktalk_01.activities.LoginActivity"
+        <activity android:name="com.example.locktalk_01.activities.LoginActivity"
             android:exported="false" />
-        <activity
-            android:name="com.example.locktalk_01.activities.AccessibilityActivity"
+        <activity android:name="com.example.locktalk_01.activities.AccessibilityActivity"
             android:exported="false" />
-        <activity
-            android:name="com.example.locktalk_01.activities.EncryptionActivity"
-            android:exported="false" />
+
         <activity
             android:name=".activities.ImagePickerProxyActivity"
-            android:exported="true"
             android:launchMode="singleTop"
+            android:exported="false"
             android:taskAffinity=""
             android:excludeFromRecents="true"
             android:theme="@style/Theme.TransparentOverlay" />
 
-        <!-- שירות הנגישות -->
+        <!-- שירות נגישות -->
         <service
             android:name="com.example.locktalk_01.services.MyAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -82,6 +85,8 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- FileProvider -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

@@ -1,36 +1,56 @@
-<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:orientation="horizontal"
     android:background="@drawable/overlay_bg"
     android:padding="8dp"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content">
 
-    <Button
+    <ImageButton
         android:id="@+id/overlaySelectImageButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="בחר תמונה" />
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@android:color/transparent"
+        android:src="@drawable/ic_gallery"
+        android:contentDescription="בחר תמונה"
+        android:scaleType="centerInside"
+        android:padding="6dp"
+        android:layout_marginEnd="8dp"
+        app:tint="@android:color/black" />
 
-    <Button
+    <ImageButton
         android:id="@+id/overlayDecryptButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="פענוח" />
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@android:color/transparent"
+        android:src="@drawable/ic_eye"
+        android:contentDescription="פענוח"
+        android:scaleType="centerInside"
+        android:padding="6dp"
+        android:layout_marginEnd="8dp"
+        app:tint="@android:color/black" />
 
+    <!-- טיימר -->
     <TextView
         android:id="@+id/timerTextView"
         android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_height="36dp"
         android:text="00:00"
-        android:textSize="14sp"
-        android:layout_marginStart="8dp"
-        android:visibility="gone" />
+        android:textSize="16sp"
+        android:gravity="center"
+        android:layout_marginEnd="6dp"
+        android:layout_marginStart="6dp"
+        android:visibility="visible"
+        android:textStyle="bold"/>
 
-    <Button
+    <ImageButton
         android:id="@+id/overlayCloseButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="סגור" />
-
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@android:color/transparent"
+        android:src="@drawable/ic_close"
+        android:contentDescription="סגור"
+        android:scaleType="centerInside"
+        android:padding="6dp"
+        app:tint="@android:color/black" />
 </LinearLayout>

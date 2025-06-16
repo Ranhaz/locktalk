@@ -19,6 +19,15 @@ public class EncryptionHelper {
         return new SecretKeySpec(key, "AES");
     }
 
+    public static byte[] decrypt(byte[] cipherText, String code) throws Exception {
+        SecretKey key = getKeyFromPassword(code);
+        byte[] iv = Arrays.copyOfRange(cipherText, 0, GCM_IV_LENGTH);
+        byte[] enc = Arrays.copyOfRange(cipherText, GCM_IV_LENGTH, cipherText.length);
+        Cipher cipher = Cipher.getInstance(AES_MODE);
+        cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
+        return cipher.doFinal(enc);
+    }
+
     public static byte[] encrypt(byte[] plain, String code) throws Exception {
         SecretKey key = getKeyFromPassword(code);
         Cipher cipher = Cipher.getInstance(AES_MODE);
@@ -29,14 +38,5 @@ public class EncryptionHelper {
         System.arraycopy(iv, 0, out, 0, GCM_IV_LENGTH);
         System.arraycopy(encrypted, 0, out, GCM_IV_LENGTH, encrypted.length);
         return out;
-    }
-
-    public static byte[] decrypt(byte[] cipherText, String code) throws Exception {
-        SecretKey key = getKeyFromPassword(code);
-        byte[] iv = Arrays.copyOfRange(cipherText, 0, GCM_IV_LENGTH);
-        byte[] enc = Arrays.copyOfRange(cipherText, GCM_IV_LENGTH, cipherText.length);
-        Cipher cipher = Cipher.getInstance(AES_MODE);
-        cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
-        return cipher.doFinal(enc);
     }
 }
