@@ -1,139 +1,83 @@
-<!DOCTYPE html>
-<html lang="he">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>celebration by OREL</title>
-    <link rel="stylesheet" href="styles.css">
-    <script src="script.js" defer></script>
-</head>
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/splash_background"
+    android:paddingHorizontal="24dp"
+    android:gravity="center">     <!-- משאיר את המרכוז הכללי -->
 
-<body>
-    <header>
-        <h1>celebration by OREL</h1>
-        <div id="user-greeting">
-            <form id="login-form" onsubmit="updateGreeting(); return false;">
-                <input type="text" id="fullname" placeholder="הכנס שם מלא" required>
-                <button type="submit">התחבר</button>
-            </form>
-        </div>
-    </header>
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 
-    <nav>
-        <!-- <a href="#about">אודות</a> --> <!-- הוסר -->
-        <a href="contact.html">צור קשר</a>
-        <a href="QA.html">שאלות ותשובות</a>
-        <a href="home page.html">עמוד הבית</a>
-        <a href="#cart" onclick="toggleCart()">עגלת קניות <span id="cart-count">0</span></a>
-    </nav>
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="הגדר את הקוד האישי שלך לפיענוח הודעות מוצפנות"
+        android:textSize="20sp"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:layout_marginBottom="32dp"
+        android:gravity="center"
+        android:textAlignment="center"
+        android:layout_gravity="center_horizontal" />
 
-    <div>
-        <div id="cart-content" class="cart-content"> 
-            <h2>עגלת קניות</h2>
-            <span class="exit-button" onclick="toggleCart()">X</span>
-            <button class="clear-cart-button" onclick="clearCart()">נקה עגלה</button>
-            <table>
-                <thead>
-                    <tr>
-                        <th>שם המוצר</th>
-                        <th>מחיר</th>
-                        <th>כמות</th>
-                        <th>סך הכל</th>
-                        <th>פעולות</th>
-                    </tr>
-                </thead>
-                <tbody id="cart-items"></tbody>
-            </table>
-            <div id="total-price">סכום כולל: 0 ש"ח</div>
-            <button class="button" onclick="proceedToCheckout()">לתשלום</button>
-        </div>
-    </div>
+    <!-- שדה קוד אישי ממורכז -->
+    <EditText
+        android:id="@+id/personalCodeInput"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:hint="קוד אישי (4 ספרות)"
+        android:maxLength="4"
+        android:inputType="numberPassword"
+        android:paddingHorizontal="4dp"
+        android:layout_marginBottom="24dp"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#CCCCCC"
+        android:background="@android:color/transparent"
+        android:gravity="center"
+        android:textAlignment="center" />
 
-    <div id="all" class="tab-content">
-        <div class="product">
-            <h3>#001 - בלונים</h3>
-            <p><strong>תיאור:</strong> ערכה של 10 בלונים מגוונים</p>
-            <p><strong>קטגוריה:</strong> עיצוב יום הולדת</p>
-            <p><strong>מחיר</strong> 30 ש"ח</p>
-            <img src="balloons.jpg" alt="בלונים" width="150">
-            <button onclick="addToCart('#001 - בלונים', 'balloons.jpg', 1, 30)">הוסף לעגלה</button>
-        </div>
-        <div class="product">
-            <h3>#002 - מפה חד פעמית</h3>
-            <p><strong>תיאור:</strong> מפה חד פעמית עם דגלי העולם</p>
-            <p><strong>קטגוריה:</strong> כלי שולחן</p>
-            <p><strong>מחיר</strong> 30 ש"ח</p>
-            <img src="map.jpg" alt="מפה חד פעמית" width="150">
-            <button onclick="addToCart('#002 - מפה חד פעמית', 'map.jpg', 1, 30)">הוסף לעגלה</button>
-        </div>
-        <div class="product">
-            <h3>#003 - כוסות חד פעמיות</h3>
-            <p><strong>תיאור:</strong> ערכה של 20 כוסות חד פעמיות צבעוניות</p>
-            <p><strong>קטגוריה:</strong> כלי שולחן</p>
-            <p><strong>מחיר</strong> 25 ש"ח</p>
-            <img src="cups.jpg" alt="כוסות חד פעמיות" width="150">
-            <button onclick="addToCart('#003 - כוסות חד פעמיות', 'cups.jpg', 1, 25)">הוסף לעגלה</button>
-        </div>
-        <div class="product">
-            <h3>#004 - צלחות חד פעמיות</h3>
-            <p><strong>תיאור:</strong> ערכה של 20 צלחות חד פעמיות מעוצבות</p>
-            <p><strong>קטגוריה:</strong> כלי שולחן</p>
-            <p><strong>מחיר</strong> 25 ש"ח</p>
-            <img src="plates.jpg" alt="צלחות חד פעמיות" width="150">
-            <button onclick="addToCart('#004 - צלחות חד פעמיות', 'plates.jpg', 1, 25)">הוסף לעגלה</button>
-        </div>
-        <div class="product">
-            <h3>#005 - קונפטי</h3>
-            <p><strong>תיאור:</strong> ערכת קונפטי ליצירת אווירה קסומה באירוע</p>
-            <p><strong>קטגוריה:</strong> אביזרי מסיבה</p>
-            <p><strong>מחיר</strong> 15 ש"ח</p>
-            <img src="confetti.jpg" alt="קונפטי" width="150">
-            <button onclick="addToCart('#005 - קונפטי', 'confetti.jpg', 1, 15)">הוסף לעגלה</button>
-        </div>
-        <div class="product">
-            <h3>#006 - כובעי מסיבה</h3>
-            <p><strong>תיאור:</strong> ערכה של 10 כובעי מסיבה עם פסים צבעוניים</p>
-            <p><strong>קטגוריה:</strong> אביזרי מסיבה</p>
-            <p><strong>מחיר</strong> 10 ש"ח</p>
-            <img src="party_hats.jpg" alt="כובעי מסיבה" width="150">
-            <button onclick="addToCart('#006 - כובעי מסיבה', 'party_hats.jpg', 1, 10)">הוסף לעגלה</button>
-        </div>
-        <div class="product">
-            <h3>#007 - דגלים</h3>
-            <p><strong>תיאור:</strong> ערכה של 10 דגלים לתלייה בפינה או מעל השולחן</p>
-            <p><strong>קטגוריה:</strong> אביזרי מסיבה</p>
-            <p><strong>מחיר</strong> 20 ש"ח</p>
-            <img src="flags.jpg" alt="דגלים" width="150">
-            <button onclick="addToCart('#007 - דגלים', 'flags.jpg', 1, 20)">הוסף לעגלה</button>
-        </div>
-        <div class="product">
-            <h3>#008 - פיניאטה</h3>
-            <p><strong>תיאור:</strong> פיניאטה בצורת מגלה עם פריטים קטנים בתוכה</p>
-            <p><strong>קטגוריה:</strong> אביזרי מסיבה</p>
-            <p><strong>מחיר</strong> 40 ש"ח</p>
-            <img src="pinata.jpg" alt="פיניאטה" width="150">
-            <button onclick="addToCart('#008 - פיניאטה', 'pinata.jpg', 1, 40)">הוסף לעגלה</button>
-        </div>
-        <div class="product">
-            <h3>#009 - אותיות מוארות</h3>
-            <p><strong>תיאור:</strong> אותיות מוארות ליצירת כיתובים מרהיבים</p>
-            <p><strong>קטגוריה:</strong> אביזרי מסיבה</p>
-            <p><strong>מחיר:</strong> 30 ש"ח </p>
-            <img src="lighted_letters.jpg" alt="אותיות מוארות" width="150">
-            <button onclick="addToCart('#009 - אותיות מוארות', 'lighted_letters.jpg', 1, 30)">הוסף לעגלה</button>
-        </div>
-        <div class="product">
-            <h3>#010 - גליל חוט לבלונים</h3>
-            <p><strong>תיאור:</strong>חוט ורוד לבלונים</p>
-            <p><strong>קטגוריה:</strong>בלונים</p>
-            <p><strong>מחיר:</strong> 30 ש"ח </p>
-            <img src="HOT.jpg" alt="בלונים" width="150">
-            <button onclick="addToCart('#010 - גליל חוט לבלונים', 'HOT.jpg', 1, 30)">הוסף לעגלה</button>
-        </div>
-    </div>
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#335C7D"
+        android:layout_marginBottom="32dp"/>
 
-    <div id="whatsapp-icon" style="position: fixed; bottom: 20px; left: 20px;">
-        <a href="https://www.whatsapp.com/"><img src="whatsapp_icon.png" alt="אייקון ווצאפ" width="50"></a>
-    </div>
-</body>
-</html>
+    <Button
+        android:id="@+id/savePersonalCodeButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="שמור קוד אישי"
+        android:background="#165C7D"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:layout_marginBottom="32dp"/>
+
+    <Button
+        android:id="@+id/openWhatsAppButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="פתח WhatsApp"
+        android:background="@drawable/glowing_button"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:layout_marginBottom="32dp"/>
+
+    <Button
+        android:id="@+id/logoutButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="התנתק"
+        android:background="#335C7D"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:layout_marginBottom="32dp"/>
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+</LinearLayout>
