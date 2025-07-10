@@ -211,17 +211,20 @@ public class OverlayManager {
                                      @NonNull Rect bounds,
                                      boolean outgoing,
                                      @NonNull String id) {
-        // הגנה: אל תציג אם לא בוואטסאפ
+        Log.d("LT_BUBBLE", "showDecryptedOverlay called: id=" + id + ", text=" + txt + ", outgoing=" + outgoing);
         if (!MyAccessibilityService.getInstance().isReallyInWhatsApp()) {
-            hide();
+            Log.d("LT_BUBBLE", "Not in WhatsApp, skipping overlay");
+            hideBubblesOnly();
             return;
         }
         if (bounds.width() <= 0 || bounds.height() <= 0) {
-            Log.e(TAG, "Invalid bounds for text overlay: " + bounds.toShortString());
+            Log.e("LT_BUBBLE", "Invalid bounds for text overlay: " + bounds.toShortString());
             return;
         }
-        if (bubbleOverlays.containsKey(id)) return;
-
+        if (bubbleOverlays.containsKey(id)) {
+            Log.d("LT_BUBBLE", "Overlay already exists for id=" + id);
+            return;
+        }
         View bubble = LayoutInflater.from(ctx).inflate(R.layout.overlay_bubble, null);
         TextView tv = bubble.findViewById(R.id.bubbleText);
         tv.setText(txt);
@@ -236,25 +239,28 @@ public class OverlayManager {
         }
 
         addOverlay(bubble, translucentLp(bounds.width(), bounds.height(), bounds.left, bounds.top), id);
-        Log.d(TAG, "Text overlay shown: " + id);
-
+        Log.d("LT_BUBBLE", "Text overlay shown: " + id);
         updateOverlaysVisibility();
     }
 
     // מציג תמונה מפוענחת על גבי התמונה המקורית
     public void showDecryptedImageOverlay(@NonNull Bitmap src, @NonNull Rect r, @NonNull String imageUniqueId) {
-        // הגנה: אל תציג אם לא בוואטסאפ
+        Log.d("LT_IMG_DECRYPT", "showDecryptedImageOverlay called: id=" + imageUniqueId + ", rect=" + r.toShortString());
         if (!MyAccessibilityService.getInstance().isReallyInWhatsApp()) {
-            hide();
+            Log.d("LT_IMG_DECRYPT", "Not in WhatsApp, skipping overlay");
+            hideBubblesOnly();
             return;
         }
         if (r.width() <= 0 || r.height() <= 0) {
-            Log.e(TAG, "Invalid bounds for image overlay: " + r.toShortString());
+            Log.e("LT_IMG_DECRYPT", "Invalid bounds for image overlay: " + r.toShortString());
             return;
         }
         String id = imageUniqueId;
-        if (bubbleOverlays.containsKey(id)) return;
-
+        if (bubbleOverlays.containsKey(id)) {
+            Log.d("LT_IMG_DECRYPT", "Overlay already exists for id=" + id);
+            return;
+        }
+        // חיתוך
         Bitmap cropped = src;
         try {
             // חיתוך תמונה לגודל התמונה בלוגו (אם צריך)
@@ -273,7 +279,7 @@ public class OverlayManager {
                 cropped = Bitmap.createBitmap(src, cropX, cropY, cropW, cropH);
             }
         } catch (Exception e) {
-            Log.e(TAG, "crop error", e);
+            Log.e("LT_IMG_DECRYPT", "crop error", e);
             cropped = src;
         }
 
@@ -285,8 +291,7 @@ public class OverlayManager {
         iv.setOnClickListener(v -> showFullScreenImageOverlay(src));
 
         addOverlay(iv, translucentLp(r.width(), r.height(), r.left, r.top), id);
-        Log.d(TAG, "Image overlay shown: " + id + " rect: " + r.toShortString());
-
+        Log.d("LT_IMG_DECRYPT", "Image overlay shown: " + id + " rect: " + r.toShortString());
         updateOverlaysVisibility();
     }
 
@@ -420,12 +425,14 @@ public class OverlayManager {
     }
 
     // *** קריטי: מסתיר רק את הפענוחים, לא את ה־Overlay ולא עוצר טיימר! ***
+    // מחביא זמנית רק את הבועות, לא מוחק אותן
     public void hideBubblesOnly() {
         for (Map.Entry<String, View> entry : bubbleOverlays.entrySet()) {
             entry.getValue().setVisibility(View.GONE);
         }
         Log.d(TAG, "All bubbles hidden TEMPORARILY");
     }
+
 
     // עוצר הכל לחלוטין (כולל טיימר ופיענוחים)
     public void hide() {

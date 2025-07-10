@@ -37,6 +37,7 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
+import android.os.Build;
 
 public class ImagePickerProxyActivity extends AppCompatActivity {
     private static final String PREF_LOGO_SET = "logoUris";
@@ -202,32 +203,40 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
         Set<String> logos = new HashSet<>(prefs.getStringSet(PREF_LOGO_SET, new HashSet<>()));
         int labelCounter = prefs.getInt(PREF_LABEL_COUNTER, 1);
 
+        Log.d("ImagePickerProxy", "===> handleUrisForSending: picked.size=" + picked.size());
+
         for (int i = 0; i < picked.size(); i++) {
             Uri src = picked.get(i);
             try {
                 String imgLabel = "img" + labelCounter;
                 Bitmap original = null;
                 String origPath = null;
+                Log.d("ImagePickerProxy", "[START] Processing image: " + src);
 
                 // קרא את התמונה מהמצלמה או מהגלריה
                 if (cameraImageUri != null && src.equals(cameraImageUri)) {
                     File photoFile = new File(getExternalFilesDir(Environment.DIRECTORY_PICTURES),
                             cameraImageUri.getLastPathSegment());
                     origPath = photoFile.getAbsolutePath();
+                    Log.d("ImagePickerProxy", "[CAMERA] photoFile=" + origPath);
                     original = BitmapFactory.decodeFile(origPath);
                     original = fixImageOrientation(null, origPath, original);
                 } else {
                     origPath = getPath(this, src);
+                    Log.d("ImagePickerProxy", "[GALLERY] origPath=" + origPath);
                     if (origPath != null) {
                         original = BitmapFactory.decodeFile(origPath);
                         original = fixImageOrientation(null, origPath, original);
                     } else {
                         InputStream in = getContentResolver().openInputStream(src);
                         original = BitmapFactory.decodeStream(in);
-                        // אין תקיה ל־origPath, רק bitmap.
+                        Log.d("ImagePickerProxy", "[GALLERY] origPath=null, loaded from stream");
                     }
                 }
-                if (original == null) continue;
+                if (original == null) {
+                    Log.e("ImagePickerProxy", "[ERROR] original is null for: " + src);
+                    continue;
+                }
 
                 // שמירת קובץ מקורי מוצפן בתיקיית app (לא בגלריה)
                 File dir = new File(getFilesDir(), "locktalk");
@@ -236,6 +245,7 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
                 try (OutputStream out = new FileOutputStream(orig)) {
                     original.compress(Bitmap.CompressFormat.JPEG, 98, out);
                 }
+                Log.d("ImagePickerProxy", "[SAVE] original saved to: " + orig.getAbsolutePath());
 
                 // יצירת לוגו בגודל התמונה
                 Bitmap logoBmp = BitmapFactory.decodeResource(getResources(), R.drawable.locktalk_logo);
@@ -250,21 +260,25 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
                 }
                 Uri placeholderUri = FileProvider.getUriForFile(this, getPackageName() + ".provider", placeholderFile);
 
+                Log.d("ImagePickerProxy", "[PLACEHOLDER] placeholderUri: " + placeholderUri);
+
                 logos.add(placeholderUri.toString());
                 SharedPreferences creds = getSharedPreferences("UserCredentials", MODE_PRIVATE);
                 String currentPersonalCode = creds.getString("personalCode", "");
+
+                Log.d("ImagePickerProxy", "[PREFS] imgLabel: " + imgLabel + " orig=" + orig.getAbsolutePath() + " placeholderUri=" + placeholderUri + " personalCode=" + currentPersonalCode);
 
                 prefs.edit()
                         .putStringSet(PREF_LOGO_SET, logos)
                         .putString("origPath_for_" + imgLabel, orig.getAbsolutePath())
                         .putString("pendingImageUri", placeholderUri.toString())
-                        .putString("personalCode_for_" + imgLabel, currentPersonalCode)
                         .apply();
 
                 MyAccessibilityService svc = MyAccessibilityService.getInstance();
                 if (svc != null) svc.setEncryptedImageUri(placeholderUri.toString());
 
                 // שליחת התמונה לווטסאפ עם קפצ'ן (תווית)
+                Log.d("ImagePickerProxy", "[SEND] Sending placeholderUri=" + placeholderUri + " imgLabel=" + imgLabel);
                 sendImageWithCaption(placeholderUri, imgLabel);
 
                 labelCounter++;
@@ -275,9 +289,9 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
         }
         prefs.edit().putInt(PREF_LABEL_COUNTER, labelCounter).apply();
         setDialogOpen(false);
+        Log.d("ImagePickerProxy", "[END] Finished handleUrisForSending");
         finish();
     }
-
     public static Bitmap fixImageOrientation(InputStream imageStream, String imagePath, Bitmap bitmap) {
         try {
             ExifInterface exif;

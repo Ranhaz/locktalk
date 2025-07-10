@@ -1,26 +1,29 @@
 package com.example.locktalk_01.utils;
+import androidx.core.content.ContextCompat;
 
+import android.Manifest;
+import android.annotation.SuppressLint;
+import android.content.ContentResolver;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Rect;
 import android.net.Uri;
+import android.provider.ContactsContract;
 import android.util.Log;
 import android.util.Pair;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Pattern;
 
 public class WhatsAppUtils {
     private static final String TAG = "WhatsAppUtils";
     private static final int MIN_BUBBLE_SIZE = 150;
-    private static final Pattern FAKE_TEXT_PATTERN = Pattern.compile("^[A-Za-z0-9]{8,}$");
+    private static final Pattern FAKE_TEXT_PATTERN = Pattern.compile("^[A-Za-z0-9+/=]{16,}$");
 
     // ----------------------------------------------------------- helpers ----
     public static String normalize(String s) {
@@ -30,13 +33,36 @@ public class WhatsAppUtils {
                 .trim();
     }
 
+    /** נירמול שם שיחה: מסיר אימוג'ים, תווים חריגים וסימני פיסוק */
+    public static String normalizeChatTitle(String title) {
+        if (title == null) return "";
+        return title.replaceAll("[^\\p{L}\\p{Nd}\\s]", "")
+                .replaceAll("[\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]", "")
+                .trim();
+    }
+
+    /** נירמול טלפון לפורמט בינלאומי */
+    public static String normalizePhone(String phone) {
+        if (phone == null) return null;
+        phone = phone.replaceAll("[^\\d+]", "");
+        if (phone.startsWith("00")) phone = "+" + phone.substring(2);
+        if (phone.startsWith("0")) phone = "+972" + phone.substring(1);
+        if (phone.startsWith("972") && !phone.startsWith("+972")) phone = "+" + phone;
+        while (phone.startsWith("++")) phone = phone.substring(1);
+        return phone;
+    }
+
     // ------------------------------------------------------ image bubbles ---
     public static List<Pair<AccessibilityNodeInfo, Rect>> findImageBubbleButtons(AccessibilityNodeInfo root) {
         List<Pair<AccessibilityNodeInfo, Rect>> out = new ArrayList<>();
         Set<AccessibilityNodeInfo> seen = new HashSet<>();
         findButtonsRec(root, out, seen);
+        for (AccessibilityNodeInfo n : seen) {
+            if (n != root) n.recycle(); // 🔥 RECYCLE
+        }
         return out;
     }
+
     private static void findButtonsRec(AccessibilityNodeInfo n, List<Pair<AccessibilityNodeInfo, Rect>> out, Set<AccessibilityNodeInfo> seen) {
         if (n == null || seen.contains(n)) return;
         seen.add(n);
@@ -54,15 +80,36 @@ public class WhatsAppUtils {
         }
         for (int i = 0; i < n.getChildCount(); i++) findButtonsRec(n.getChild(i), out, seen);
     }
+
     public static List<Pair<String, Rect>> findImageLabels(AccessibilityNodeInfo root) {
         List<Pair<String, Rect>> out = new ArrayList<>();
         if (root == null) return out;
         Pattern imgPattern = Pattern.compile("^img\\d+$", Pattern.CASE_INSENSITIVE);
         findLabelsRec(root, out, imgPattern);
         for (Pair<String, Rect> p : out) {
-            Log.d("WhatsAppUtils", "Found image label: " + p.first + " rect=" + p.second);
+            Log.d(TAG, "Found image label: " + p.first + " rect=" + p.second);
         }
         return out;
+    }
+    // תוספת סינון הודעות מוצפנות בלבד:
+    public static List<AccessibilityNodeInfo> findEncryptedMessages(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> out = new ArrayList<>();
+        Set<AccessibilityNodeInfo> vis = new HashSet<>();
+        findEncRec(root, out, vis);
+        return out;
+    }
+    private static void findEncRec(AccessibilityNodeInfo n, List<AccessibilityNodeInfo> out, Set<AccessibilityNodeInfo> vis) {
+        if (n == null || vis.contains(n)) return; vis.add(n);
+        CharSequence id = n.getViewIdResourceName();
+        if (id != null && "com.whatsapp:id/message_text".contentEquals(id)) {
+            CharSequence cs = n.getText();
+            if (cs != null && FAKE_TEXT_PATTERN.matcher(normalize(cs.toString())).matches()) {
+                out.add(n);
+                Log.d(TAG, "Encrypted text bubble: " + cs);
+                return;
+            }
+        }
+        for (int i = 0; i < n.getChildCount(); i++) findEncRec(n.getChild(i), out, vis);
     }
 
 
@@ -81,6 +128,67 @@ public class WhatsAppUtils {
         }
     }
 
+    /** מיפוי שם שיחה למספר טלפון אוטומטי (Cache > אנשי קשר) */
+    public static String getPhoneByPeerName(Context ctx, String name) {
+        if (name == null || name.trim().isEmpty()) return null;
+        String cleanName = normalizeChatTitle(name);
+
+        String result = ctx.getSharedPreferences("PeerNames", Context.MODE_PRIVATE)
+                .getString(cleanName, null);
+        if (result != null) {
+            Log.d(TAG, "getPhoneByPeerName: (CACHED) '" + cleanName + "' -> " + result);
+            return normalizePhone(result);
+        }
+
+        String phoneFromContacts = findPhoneInContacts(ctx, cleanName);
+        if (phoneFromContacts != null) {
+            ctx.getSharedPreferences("PeerNames", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(cleanName, phoneFromContacts)
+                    .apply();
+            Log.d(TAG, "getPhoneByPeerName: (CONTACTS) '" + cleanName + "' -> " + phoneFromContacts);
+            return normalizePhone(phoneFromContacts);
+        }
+        Log.d(TAG, "getPhoneByPeerName: '" + cleanName + "' -> null");
+        return null;
+    }
+
+    public static String findPhoneInContacts(Context context, String chatTitle) {
+        if (chatTitle == null) return null;
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "NO PERMISSION TO READ CONTACTS!");
+            return null;
+        }
+        String normalizedTitle = normalizeChatTitle(chatTitle);
+        ContentResolver cr = context.getContentResolver();
+        Cursor cursor = cr.query(ContactsContract.Contacts.CONTENT_URI, null, null, null, null);
+        if (cursor != null) {
+            while (cursor.moveToNext()) {
+                @SuppressLint("Range") String contactId = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts._ID));
+                @SuppressLint("Range") String displayName = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
+                if (displayName != null && normalizeChatTitle(displayName).equalsIgnoreCase(normalizedTitle)) {
+                    @SuppressLint("Range") int hasPhoneNumber = cursor.getInt(cursor.getColumnIndex(ContactsContract.Contacts.HAS_PHONE_NUMBER));
+                    if (hasPhoneNumber > 0) {
+                        Cursor phones = cr.query(
+                                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                                null,
+                                ContactsContract.CommonDataKinds.Phone.CONTACT_ID + " = ?",
+                                new String[]{contactId},
+                                null
+                        );
+                        if (phones != null && phones.moveToFirst()) {
+                            @SuppressLint("Range") String phoneNumber = phones.getString(phones.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER));
+                            phones.close();
+                            return phoneNumber;
+                        }
+                        if (phones != null) phones.close();
+                    }
+                }
+            }
+            cursor.close();
+        }
+        return null;
+    }
 
     // ------------------------------------------------------------- URI scan --
     public static Uri getImageUriFromNode(AccessibilityNodeInfo node) {
@@ -126,10 +234,8 @@ public class WhatsAppUtils {
         return null;
     }
 
-    // פונקציה חדשה: נסה להוציא Bitmap מתוך AccessibilityNodeInfo של Bubble תמונה (רק אם אפשר).
     public static Bitmap extractBitmapFromNode(AccessibilityNodeInfo node, Context context) {
         try {
-            // ננסה לשלוף את ה-Uri מה-node
             Uri uri = WhatsAppUtils.getImageUriFromNode(node);
             if (uri != null) {
                 InputStream input = context.getContentResolver().openInputStream(uri);
@@ -143,7 +249,6 @@ public class WhatsAppUtils {
         return null;
     }
 
-    // --------------------------------------------------- Find all text bubbles (like img1, img2, ...)
     public static List<AccessibilityNodeInfo> findAllTextBubbles(AccessibilityNodeInfo root) {
         List<AccessibilityNodeInfo> out = new ArrayList<>();
         findAllTextBubblesRec(root, out);
@@ -159,11 +264,10 @@ public class WhatsAppUtils {
             findAllTextBubblesRec(n.getChild(i), out);
         }
     }
-    // ב-WhatsAppUtils:
-    // תחזיר את שם השיחה הפעילה, מזהה אוטומטית את הטקסט הראשי של הצ'אט
+
+    /** קבלת שם השיחה (עם נירמול, אם לא מוצא) */
     public static String getCurrentChatTitle(AccessibilityNodeInfo root) {
         if (root == null) return null;
-        // בדרך כלל בראש יש ViewId עם id של שם השיחה
         List<AccessibilityNodeInfo> candidates = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/conversation_contact_name");
         if (candidates != null && !candidates.isEmpty()) {
             CharSequence cs = candidates.get(0).getText();
@@ -182,10 +286,10 @@ public class WhatsAppUtils {
         return null;
     }
 
-
-    // --------------------------------------------------------- WhatsApp misc -
     public static boolean isWhatsAppPackage(String p) { return p != null && p.startsWith("com.whatsapp"); }
+
     public static String getImagePathFromUri(Context ctx, Uri uri) {
+        if (uri == null) return null;
         if (uri == null) return null;
         if ("file".equalsIgnoreCase(uri.getScheme())) {
             return uri.getPath();
@@ -213,24 +317,4 @@ public class WhatsAppUtils {
         return t;
     }
 
-    // --------------------------------------------- encrypted-text bubbles ----
-    public static List<AccessibilityNodeInfo> findEncryptedMessages(AccessibilityNodeInfo root) {
-        List<AccessibilityNodeInfo> out = new ArrayList<>();
-        Set<AccessibilityNodeInfo> vis = new HashSet<>();
-        findEncRec(root, out, vis);
-        return out;
-    }
-    private static void findEncRec(AccessibilityNodeInfo n, List<AccessibilityNodeInfo> out, Set<AccessibilityNodeInfo> vis) {
-        if (n == null || vis.contains(n)) return; vis.add(n);
-        CharSequence id = n.getViewIdResourceName();
-        if (id != null && "com.whatsapp:id/message_text".contentEquals(id)) {
-            CharSequence cs = n.getText();
-            if (cs != null && FAKE_TEXT_PATTERN.matcher(normalize(cs.toString())).matches()) {
-                out.add(n);
-                Log.d(TAG, "Encrypted text bubble: " + cs);
-                return;
-            }
-        }
-        for (int i = 0; i < n.getChildCount(); i++) findEncRec(n.getChild(i), out, vis);
-    }
 }

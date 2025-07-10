@@ -1,12 +1,18 @@
 package com.example.locktalk_01.services;
 
+import android.Manifest;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
+import android.annotation.SuppressLint;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
+import com.example.locktalk_01.utils.FirebaseUserUtils;
+
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -16,6 +22,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.ContactsContract;
 import android.provider.Settings;
 import android.text.InputType;
 import android.util.DisplayMetrics;
@@ -30,14 +37,21 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.content.ContextCompat;
+
 import com.example.locktalk_01.activities.AndroidKeystorePlugin;
 import com.example.locktalk_01.activities.ImagePickerProxyActivity;
 import com.example.locktalk_01.managers.OverlayManager;
+import com.example.locktalk_01.utils.EncryptionHelper;
 import com.example.locktalk_01.utils.ImageStorageHelper;
 import com.example.locktalk_01.utils.TextInputUtils;
 import com.example.locktalk_01.utils.WhatsAppUtils;
+import com.google.firebase.firestore.DocumentSnapshot;
+import com.google.firebase.firestore.FirebaseFirestore;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -51,6 +65,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import javax.crypto.spec.SecretKeySpec;
 
 public class MyAccessibilityService extends AccessibilityService {
     private static final String TAG = "MyAccessibilityService";
@@ -97,8 +113,6 @@ public class MyAccessibilityService extends AccessibilityService {
 
     private void tryDecryptInternal() {
         tryDecryptAttempts++;
-        Log.d("LT", "tryDecryptWithRetry: attempt " + tryDecryptAttempts);
-
         AccessibilityNodeInfo root = getRootInActiveWindow();
         boolean canTry = false;
         if (root != null && root.getPackageName() != null) {
@@ -107,15 +121,11 @@ public class MyAccessibilityService extends AccessibilityService {
         }
         if (canTry) {
             decryptChatBubbles();
-            Log.d("LT", "tryDecryptWithRetry: WhatsApp window detected, decrypt called");
-        } else if (tryDecryptAttempts < 10) { // נסי עד 10 פעמים (כ-3 שניות)
+        } else if (tryDecryptAttempts < 10) {
             tryDecryptHandler.postDelayed(this::tryDecryptInternal, 300);
-        } else {
-            Log.d("LT", "tryDecryptWithRetry: Gave up, window not WhatsApp");
         }
         if (root != null) root.recycle();
     }
-
     public static MyAccessibilityService getInstance() {
         return instance;
     }
@@ -234,28 +244,22 @@ public class MyAccessibilityService extends AccessibilityService {
 
             if (forbidden) {
                 if (overlayManager.isShown()) {
-                    // אין לעולם לעצור את הטיימר אם pkg == getPackageName() (כל עוד הדיאלוג שלך פתוח)
                     if (!WhatsAppUtils.isWhatsAppPackage(pkg)
                             && !pkg.equals(getPackageName())
                             && !pkg.toLowerCase().contains("systemui")
                             && !pkg.toLowerCase().contains("com.android")
                             && !pkg.toLowerCase().contains("resolver")
-                            && !ImagePickerProxyActivity.isDialogOpen() // הגנה נוספת אם הדיאלוג שלך פתוח
-                    ) {
-                        Log.d("LT_OVERLAY", "יציאה מלאה - סגירת overlay והפסקת טיימר");
+                            && !ImagePickerProxyActivity.isDialogOpen()) {
                         overlayManager.hide();
                         stopContinuousDecryption();
                     } else {
-                        Log.d("LT_OVERLAY", "מסך זמני (דיאלוג/בורר/מצלמה/גלריה/האפליקציה שלך) - הסתרת בועות בלבד");
                         overlayManager.hideBubblesOnly();
                     }
                 }
-
-
-
                 if (root != null) root.recycle();
                 return;
             }
+
 
             // ------- המשך קוד רגיל שלך, לא נוגע בזה ------
 
@@ -434,7 +438,7 @@ public class MyAccessibilityService extends AccessibilityService {
     }
 
 
-    // === חדש: מוצא את ה-ImageView הכי גדול במסך
+    // === מוצא את ה-ImageView הכי גדול במסך ===
     private Rect findFullscreenImageRect(AccessibilityNodeInfo root) {
         if (root == null) return null;
         Rect largest = null;
@@ -445,6 +449,7 @@ public class MyAccessibilityService extends AccessibilityService {
         while (!queue.isEmpty()) {
             AccessibilityNodeInfo n = queue.poll();
             if (n == null) continue;
+
             if ("android.widget.ImageView".contentEquals(n.getClassName())) {
                 Rect b = new Rect();
                 n.getBoundsInScreen(b);
@@ -458,265 +463,448 @@ public class MyAccessibilityService extends AccessibilityService {
                 AccessibilityNodeInfo c = n.getChild(i);
                 if (c != null) queue.add(c);
             }
-            n.recycle();
+            // אין recycle על root
+            if (n != root) n.recycle();
         }
         return largest;
-    }private void decryptFullScreenImage(AccessibilityNodeInfo root) {
-        // מוצא את הרקטנגל של התמונה הגדולה במסך
-        Rect imageBounds = findFullscreenImageRect(root);
-        if (imageBounds == null) {
-            DisplayMetrics dm = getResources().getDisplayMetrics();
-            imageBounds = new Rect(0, 0, dm.widthPixels, dm.heightPixels);
-        }
-
-        // מנסה למצוא את הלייבל האחרון במסך (בדרך כלל בולט מאוד בצ'אט)
-        List<Pair<String, Rect>> imgLabels = WhatsAppUtils.findImageLabels(root);
-        String imgLabel = imgLabels.isEmpty() ? null : imgLabels.get(imgLabels.size() - 1).first; // האחרון במסך
-
-        if (imgLabel == null) {
-            Log.d("MyAccessibilityService", "No imgLabel found for fullscreen image");
-            return;
-        }
-
-        SharedPreferences prefsLock = getSharedPreferences("LockTalkPrefs", MODE_PRIVATE);
-        SharedPreferences creds = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
-        String origPath = prefsLock.getString("origPath_for_" + imgLabel, null);
-
-        // --- הוספת בדיקת קוד אישי! ---
-        String personalCodeForImage = prefsLock.getString("personalCode_for_" + imgLabel, null);
-        String currentPersonalCode = creds.getString(PERSONAL_CODE_PREF, "");
-        if (personalCodeForImage == null || !personalCodeForImage.equals(currentPersonalCode)) {
-            Log.d("MyAccessibilityService", "Full image " + imgLabel + " skipped: encrypted with old personal code!");
-            mainHandler.post(() -> showToast("תמונה זו הוצפנה עם קוד אישי קודם ולא ניתן לפענח אותה"));
-            return;
-        }
-
-        if (origPath == null) {
-            Log.d("MyAccessibilityService", "No origPath mapped for label: " + imgLabel);
-            return;
-        }
-
-        Bitmap origBmp = BitmapFactory.decodeFile(origPath);
-        if (origBmp == null) {
-            Log.d("MyAccessibilityService", "Original image not found or corrupted");
-            return;
-        }
-
-        final Rect finalBounds = imageBounds;
-        final String imageId = origPath;
-        mainHandler.post(() ->{
-                    if (!isReallyInWhatsApp()) {
-                        if (overlayManager != null) overlayManager.hide();
-                        stopContinuousDecryption();
-                        return;
-                    }
-                    overlayManager.showDecryptedImageOverlay(origBmp, finalBounds, imageId);
-                }
-        );
     }
+
+    // ============================
+// השגת טלפון עבור שיחה, עם קאש והרשאה
+    private String findAndCachePhoneForChat(Context context, String chatTitle) {
+        if (chatTitle == null) return null;
+        String normalizedTitle = WhatsAppUtils.normalizeChatTitle(chatTitle);
+
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS)
+                != PackageManager.PERMISSION_GRANTED) {
+            mainHandler.post(() -> showToast("יש לאשר הרשאת אנשי קשר לפיענוח"));
+            return null;
+        }
+
+        // בדוק קאש קודם (מנורמל)
+        String phone = context.getSharedPreferences("PeerNames", MODE_PRIVATE)
+                .getString(normalizedTitle, null);
+        if (phone != null) return WhatsAppUtils.normalizePhone(phone);
+
+        // נסה לשלוף מאנשי קשר
+        String phoneFromContacts = WhatsAppUtils.findPhoneInContacts(context, normalizedTitle);
+        if (phoneFromContacts != null) {
+            String normalizedPhone = WhatsAppUtils.normalizePhone(phoneFromContacts);
+            context.getSharedPreferences("PeerNames", MODE_PRIVATE)
+                    .edit()
+                    .putString(normalizedTitle, normalizedPhone)
+                    .apply();
+            return normalizedPhone;
+        }
+        return null;
+    }
+
     private boolean isRetryingDecrypt = false;
 
-    private volatile boolean decryptRunning = false; // עזר נגד חפיפות
-
-    private void decryptChatBubbles() {
-        if (decryptRunning) return;
-        decryptRunning = true;
-        Log.d("MyAccessibilityService", "decryptChatBubbles CALLED!");
-
-        SharedPreferences creds = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
-        String userPhone = creds.getString("currentUserPhone", null);
-        if (!isWhatsAppAccountPhoneMatches(userPhone)) {
-            mainHandler.post(() -> {
-                showToast("פיענוח לא אפשרי - חשבון WhatsApp במכשיר לא תואם למשתמש!");
-                overlayManager.cleanupAllBubbles();
-                decryptRunning = false;
-            });
-            return;
-        }
-
-        if (!decryptAuthenticated || System.currentTimeMillis() > decryptExpiryTimestamp) {
-            mainHandler.post(() -> {
-                overlayManager.cleanupAllBubbles();
-                decryptRunning = false;
-            });
-            return;
-        }
-        lastDecryptTs = System.currentTimeMillis();
-
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        String className = (root != null && root.getClassName() != null) ? root.getClassName().toString() : "";
-        if (shouldHideDecryptionOverlays() || !isConversationScreen(className, root)) {
-            mainHandler.post(() -> {
-                overlayManager.cleanupAllBubbles();
-                decryptRunning = false;
-            });
-            if (root != null) root.recycle();
-            return;
-        }
-
-        List<Pair<AccessibilityNodeInfo, Rect>> txtList = new ArrayList<>();
-        List<Pair<AccessibilityNodeInfo, Rect>> imgNodes = new ArrayList<>();
-        List<Pair<String, Rect>> imgLabels = new ArrayList<>();
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-
-        // טקסט מוצפן
-        for (AccessibilityNodeInfo n : WhatsAppUtils.findEncryptedMessages(root)) {
-            if (!n.isEditable()) {
-                Rect b = new Rect();
-                n.getBoundsInScreen(b);
-                if (b.width() <= 0 || b.height() <= 0) {
-                    b = new Rect(50, 300, dm.widthPixels - 50, 400);
-                }
-                CharSequence t = n.getText();
-                if (t != null) {
-                    txtList.add(new Pair<>(AccessibilityNodeInfo.obtain(n), b)); // העתק node!
-                }
-                n.recycle();
-            }
-        }
-
-        imgNodes = WhatsAppUtils.findImageBubbleButtons(root);
-        imgLabels = WhatsAppUtils.findImageLabels(root);
-
-        if (root != null) root.recycle();
-
-        final List<Pair<AccessibilityNodeInfo, Rect>> finalTxtList = txtList;
-        final List<Pair<AccessibilityNodeInfo, Rect>> finalImgNodes = imgNodes;
-        final List<Pair<String, Rect>> finalImgLabels = imgLabels;
-
-        executor.execute(() -> {
-            if (!isReallyInWhatsApp()) {
-                mainHandler.post(() -> {
-                    if (!isReallyInWhatsApp()) {
-                        if (overlayManager != null) overlayManager.hide();
-                        stopContinuousDecryption();
-                        return;
-                    }
-                    if (overlayManager != null) overlayManager.hide();
-                    stopContinuousDecryption();
-                });
+    private volatile boolean decryptRunning = false;
+    private void decryptFullScreenImage(AccessibilityNodeInfo root) {
+        com.example.locktalk_01.utils.FirebaseUserUtils.checkUserPhoneMatch(this, isMatch -> {
+            if (!isMatch) {
+                mainHandler.post(() -> showToast("פיענוח לא אפשרי – היוזר לא תואם לחשבון!"));
+                if (overlayManager != null) overlayManager.hide();
+                stopContinuousDecryption();
                 return;
             }
+
+            Rect imageBounds = findFullscreenImageRect(root);
+            if (imageBounds == null) {
+                DisplayMetrics dm = getResources().getDisplayMetrics();
+                imageBounds = new Rect(0, 0, dm.widthPixels, dm.heightPixels);
+            }
+
+            List<Pair<String, Rect>> imgLabels = WhatsAppUtils.findImageLabels(root);
+            String imgLabel = imgLabels.isEmpty() ? null : imgLabels.get(imgLabels.size() - 1).first;
+
+            if (imgLabel == null) {
+                Log.d(TAG, "No imgLabel found for fullscreen image");
+                return;
+            }
+
+            SharedPreferences prefsLock = getApplicationContext().getSharedPreferences("LockTalkPrefs", MODE_PRIVATE);
             SharedPreferences fakeMap = getSharedPreferences(PREF_FAKE_MAP, MODE_PRIVATE);
-            SharedPreferences prefs = getSharedPreferences("LockTalkPrefs", MODE_PRIVATE);
 
-            Set<String> wantedIds = new HashSet<>();
+            String origPath = prefsLock.getString("origPath_for_" + imgLabel, null);
 
-            // פענוח טקסט מוצפן
-            for (Pair<AccessibilityNodeInfo, Rect> p : finalTxtList) {
-                final AccessibilityNodeInfo node = p.first;
-                final Rect bounds = p.second;
-                final CharSequence fake = node.getText();
-                final boolean outgoing = isOutgoingBubble(node, bounds);
-                final String actualCipher = fakeMap.getString(fake != null ? fake.toString() : "", null);
+            String chatTitle = WhatsAppUtils.getCurrentChatTitle(root);
+            String peerPhone = WhatsAppUtils.getPhoneByPeerName(this, chatTitle);
 
-                final String id = OverlayManager.bubbleId((fake != null ? fake.toString() : ""), bounds, outgoing);
-                wantedIds.add(id);
+            SharedPreferences creds = getApplicationContext().getSharedPreferences("UserCredentials", MODE_PRIVATE);
+            String myPhone = creds.getString("myPhone", null);
 
+            Log.d(TAG, "decryptFullScreenImage: imgLabel=" + imgLabel + ", origPath=" + origPath + ", myPhone=" + myPhone + ", peerPhone=" + peerPhone);
+
+            // חיפוש נוסף של peerPhone אם לא קיים
+            if ((peerPhone == null || peerPhone.length() < 7) && chatTitle != null && chatTitle.length() > 0) {
+                peerPhone = findAndCachePhoneForChat(this, chatTitle);
+                if (peerPhone != null) {
+                    getApplicationContext().getSharedPreferences("PeerNames", MODE_PRIVATE)
+                            .edit().putString(chatTitle.trim(), peerPhone).apply();
+                } else {
+                    mainHandler.post(() -> showToast("לא נמצא מספר טלפון עבור '" + chatTitle + "' באנשי קשר"));
+                    return;
+                }
+            }
+
+            if (origPath == null) {
+                Log.d(TAG, "No origPath mapped for label: " + imgLabel);
+                return;
+            }
+            if (myPhone == null || peerPhone == null) {
+                Log.e(TAG, "Missing phone numbers! myPhone=" + myPhone + ", peerPhone=" + peerPhone);
+                mainHandler.post(() -> showToast("לא נמצאו מספרים לפענוח תמונה"));
+                return;
+            }
+
+            // *** התמיכה בפייק: בדוק אם origPath הוא לא path לקובץ (כלומר אין קובץ כזה) ***
+            java.io.File file = new java.io.File(origPath);
+            if (!file.exists() || origPath.endsWith(".fakeimg")) {
+                // אם הערך ב־origPath הוא "fake" – נסה קודם ב־SharedPreferences, ואם לא – תביא מה־Firebase
+                String actualCipher = fakeMap.getString(origPath, null);
                 if (actualCipher != null) {
-                    try {
-                        final String code = creds.getString(PERSONAL_CODE_PREF, "");
-                        if (code.isEmpty()) {
-                            mainHandler.post(() -> showToast("לא הוגדר קוד אישי"));
-                            continue;
+                    // יש במכשיר: ננסה לפענח
+                    decryptAndShowImageFromCipher(actualCipher, myPhone, peerPhone, imageBounds, origPath);
+                    return;
+                } else {
+                    // לא נמצא לוקלית – ננסה מהענן (פונקציה ב-async)
+                    String finalPeerPhone = peerPhone;
+                    Rect finalImageBounds = imageBounds;
+                    fetchFakeMappingFromFirebase(myPhone, peerPhone, origPath, new FakeMapFetchCallback() {
+                        @Override
+                        public void onResult(String cipherFromCloud) {
+                            if (cipherFromCloud != null) {
+                                // נשמור גם לוקלית (תמיד כדאי!)
+                                fakeMap.edit().putString(origPath, cipherFromCloud).apply();
+                                decryptAndShowImageFromCipher(cipherFromCloud, myPhone, finalPeerPhone, finalImageBounds, origPath);
+                            } else {
+                                mainHandler.post(() -> showToast("שגיאה בפענוח תמונה - לא נמצא מוצפן בענן"));
+                            }
                         }
-                        final String plain = keystorePlugin.loadDecryptedMessage(code, actualCipher);
-                        if (plain != null) {
-                            mainHandler.post(() -> {
-                                if (!isReallyInWhatsApp()) {
-                                    if (overlayManager != null) overlayManager.hide();
-                                    stopContinuousDecryption();
-                                    return;
-                                }
-                                overlayManager.showDecryptedOverlay(plain, node, bounds, outgoing, id);
-                                node.recycle();
-                            });
-                            continue;
-                        }
-                    } catch (Exception e) {
-                        Log.e("MyAccessibilityService", "Text decrypt error", e);
-                    }
+                    });
+                    return;
                 }
-                // אם לא פוענח – ננקה
-                mainHandler.post(node::recycle);
             }
 
-            // פענוח תמונות - סינון
-            int n = Math.min(finalImgNodes.size(), finalImgLabels.size());
-            for (int i = 0; i < n; i++) {
-                final AccessibilityNodeInfo node = finalImgNodes.get(i).first;
-                final Rect imgRect = finalImgNodes.get(i).second;
-                final String imgLabel = finalImgLabels.get(i).first;
-                final String origPath = prefs.getString("origPath_for_" + imgLabel, null);
+            // === תמונה רגילה (מקובץ דיסק) ===
+            try {
+                byte[] encBytes = com.example.locktalk_01.utils.FileUtils.readBytesFromFile(origPath);
+                Log.d(TAG, "decryptFullScreenImage: read " + (encBytes != null ? encBytes.length : 0) + " bytes from " + origPath);
 
-                final String personalCodeForImage = prefs.getString("personalCode_for_" + imgLabel, null);
-                final String currentPersonalCode = creds.getString(PERSONAL_CODE_PREF, "");
-                if (personalCodeForImage == null || !personalCodeForImage.equals(currentPersonalCode)) {
-                    Log.d("MyAccessibilityService", "Image " + imgLabel + " skipped: encrypted with old personal code!");
-                    mainHandler.post(node::recycle);
-                    continue;
-                }
+                byte[] plainBytes = EncryptionHelper.decryptImage(encBytes, myPhone, peerPhone);
 
-                if (origPath == null) {
-                    Log.d("MyAccessibilityService", "No original path for " + imgLabel);
-                    mainHandler.post(node::recycle);
-                    continue;
-                }
-                Bitmap origBmp = BitmapFactory.decodeFile(origPath);
-                origBmp = ImagePickerProxyActivity.fixImageOrientation(null, origPath, origBmp);
-
-                if (origBmp == null) {
-                    Log.d("MyAccessibilityService", "Failed to decode original image for: " + imgLabel);
-                    mainHandler.post(node::recycle);
-                    continue;
-                }
-
-                final String id = "img|" + imgLabel + "|" + imgRect.toShortString();
-                wantedIds.add(id);
-
-                Log.d("MyAccessibilityService", "Showing overlay for label=" + imgLabel + " bounds=" + imgRect.toShortString());
-                final Bitmap finalOrigBmp = origBmp;
-                mainHandler.post(() -> {
-                    if (!isReallyInWhatsApp()) {
-                        if (overlayManager != null) overlayManager.hide();
-                        stopContinuousDecryption();
+                if (plainBytes != null) {
+                    Bitmap origBmp = BitmapFactory.decodeByteArray(plainBytes, 0, plainBytes.length);
+                    if (origBmp != null) {
+                        Log.d(TAG, "decryptFullScreenImage: SUCCESS!");
+                        final Rect finalBounds = imageBounds;
+                        final String imageId = origPath;
+                        mainHandler.post(() -> {
+                            if (!isReallyInWhatsApp()) {
+                                if (overlayManager != null) overlayManager.hide();
+                                stopContinuousDecryption();
+                                return;
+                            }
+                            overlayManager.showDecryptedImageOverlay(origBmp, finalBounds, imageId);
+                        });
                         return;
+                    } else {
+                        Log.e(TAG, "decryptFullScreenImage: Failed to decode bitmap from decrypted bytes");
+                        mainHandler.post(() -> showToast("שגיאה בפענוח תמונה - קובץ לא תקין"));
                     }
-                    overlayManager.showDecryptedImageOverlay(finalOrigBmp, imgRect, id);
-                    node.recycle();
-                });
-            }
+                } else {
+                    Log.e(TAG, "decryptFullScreenImage: Decryption failed!");
+                    mainHandler.post(() -> showToast("שגיאה בפענוח תמונה - מפתח לא תקין"));
+                }
 
-            mainHandler.post(() -> overlayManager.cleanupBubblesExcept(wantedIds));
-
-            // שחרור נעילה!
-            mainHandler.post(() -> decryptRunning = false);
-
-            // ניסיון נוסף, רק פעם אחת
-            if (!isRetryingDecrypt) {
-                isRetryingDecrypt = true;
-                mainHandler.postDelayed(() -> {
-                    isRetryingDecrypt = false;
-                    AccessibilityNodeInfo checkRoot = getRootInActiveWindow();
-                    String checkClass = (checkRoot != null && checkRoot.getClassName() != null) ? checkRoot.getClassName().toString() : "";
-                    if (!shouldHideDecryptionOverlays() && isConversationScreen(checkClass, checkRoot)) {
-                        decryptChatBubbles();
-                    }
-                    if (checkRoot != null) checkRoot.recycle();
-                }, 220);
+            } catch (Exception e) {
+                Log.e(TAG, "Full image decryption error", e);
+                mainHandler.post(() -> showToast("שגיאה בפענוח תמונה"));
             }
         });
     }
 
-    private boolean isCurrentAppWhatsApp() {
-        ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-        if (am == null) return false;
-        List<ActivityManager.RunningTaskInfo> taskInfo = am.getRunningTasks(1);
-        if (taskInfo == null || taskInfo.isEmpty()) return false;
-        String topActivity = taskInfo.get(0).topActivity.getPackageName();
-        return "com.whatsapp".equals(topActivity);
+    // פונקציה עזר לפענוח תמונה ממחרוזת base64 מוצפנת (לא מקובץ פיזי)
+    private void decryptAndShowImageFromCipher(String base64Cipher, String myPhone, String peerPhone, Rect imageBounds, String imageId) {
+        try {
+            byte[] encBytes = android.util.Base64.decode(base64Cipher, android.util.Base64.NO_WRAP);
+            byte[] plainBytes = EncryptionHelper.decryptImage(encBytes, myPhone, peerPhone);
+            if (plainBytes != null) {
+                Bitmap origBmp = BitmapFactory.decodeByteArray(plainBytes, 0, plainBytes.length);
+                if (origBmp != null) {
+                    mainHandler.post(() -> {
+                        if (!isReallyInWhatsApp()) {
+                            if (overlayManager != null) overlayManager.hide();
+                            stopContinuousDecryption();
+                            return;
+                        }
+                        overlayManager.showDecryptedImageOverlay(origBmp, imageBounds, imageId);
+                    });
+                } else {
+                    mainHandler.post(() -> showToast("שגיאה בפענוח תמונה - קובץ לא תקין"));
+                }
+            } else {
+                mainHandler.post(() -> showToast("שגיאה בפענוח תמונה - מפתח לא תקין"));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "decryptAndShowImageFromCipher error", e);
+            mainHandler.post(() -> showToast("שגיאה בפענוח תמונה (base64)"));
+        }
     }
-    // ------- עזר: הוסיפי למחלקה ---------
+    private void decryptChatBubbles() {
+        com.example.locktalk_01.utils.FirebaseUserUtils.checkUserPhoneMatch(this, isMatch -> {
+            if (!isMatch) {
+                Log.w("LT_DECRYPT", "User phone mismatch with Firebase!");
+                mainHandler.post(() -> {
+                    showToast("פיענוח לא אפשרי – היוזר לא תואם לחשבון ב-Firebase!");
+                    overlayManager.cleanupAllBubbles();
+                    decryptRunning = false;
+                });
+                return;
+            }
+
+            if (decryptRunning) {
+                Log.d("LT_DECRYPT", "decryptChatBubbles: Already running, skipping");
+                return;
+            }
+            decryptRunning = true;
+            Log.d("LT_DECRYPT", "decryptChatBubbles CALLED!");
+
+            SharedPreferences creds = getApplicationContext().getSharedPreferences("UserCredentials", MODE_PRIVATE);
+            String myPhone = creds.getString("myPhone", null);
+
+            Log.d("LT_DECRYPT", "myPhone: " + myPhone);
+
+            if (!isWhatsAppAccountPhoneMatches(myPhone)) {
+                Log.w("LT_DECRYPT", "WhatsApp account phone does not match myPhone!");
+                mainHandler.post(() -> {
+                    showToast("פיענוח לא אפשרי - חשבון WhatsApp במכשיר לא תואם למשתמש!");
+                    overlayManager.cleanupAllBubbles();
+                    decryptRunning = false;
+                });
+                return;
+            }
+
+            if (!decryptAuthenticated || System.currentTimeMillis() > decryptExpiryTimestamp) {
+                Log.d("LT_DECRYPT", "Decryption not authenticated or timer expired");
+                mainHandler.post(() -> {
+                    overlayManager.cleanupAllBubbles();
+                    decryptRunning = false;
+                });
+                return;
+            }
+
+            lastDecryptTs = System.currentTimeMillis();
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            String className = (root != null && root.getClassName() != null) ? root.getClassName().toString() : "";
+
+            Log.d("LT_DECRYPT", "className: " + className);
+
+            if (shouldHideDecryptionOverlays() || !isConversationScreen(className, root)) {
+                Log.d("LT_DECRYPT", "Not in conversation screen or overlays should be hidden");
+                mainHandler.post(() -> {
+                    overlayManager.cleanupAllBubbles();
+                    decryptRunning = false;
+                });
+                if (root != null) root.recycle();
+                return;
+            }
+
+            String chatTitle = WhatsAppUtils.getCurrentChatTitle(root);
+            String peerPhone = WhatsAppUtils.getPhoneByPeerName(this, chatTitle);
+
+            Log.d("LT_DECRYPT", "chatTitle: " + chatTitle + " | peerPhone: " + peerPhone);
+
+            SharedPreferences peerNames = getApplicationContext().getSharedPreferences("PeerNames", MODE_PRIVATE);
+            String cachedPeerPhone = peerNames.getString(chatTitle != null ? chatTitle.trim() : "", null);
+
+            if (peerPhone == null && cachedPeerPhone != null) {
+                peerPhone = cachedPeerPhone;
+            }
+
+            if ((peerPhone == null || peerPhone.length() < 7) && chatTitle != null && chatTitle.length() > 0) {
+                peerPhone = findAndCachePhoneForChat(this, chatTitle);
+                Log.d("LT_DECRYPT", "After findAndCachePhoneForChat, peerPhone: " + peerPhone);
+                if (peerPhone == null) {
+                    mainHandler.post(() -> {
+                        showToast("לא נמצא מספר טלפון עבור '" + chatTitle + "' באנשי קשר.");
+                        overlayManager.cleanupAllBubbles();
+                        decryptRunning = false;
+                    });
+                    if (root != null) root.recycle();
+                    return;
+                }
+            }
+
+            if (myPhone != null && peerPhone != null && myPhone.equals(peerPhone)) {
+                if (chatTitle != null && !chatTitle.isEmpty()) {
+                    String altPhone = findAndCachePhoneForChat(this, chatTitle);
+                    Log.d("LT_DECRYPT", "Self chat detected. altPhone: " + altPhone);
+                    if (altPhone != null && !altPhone.equals(myPhone)) {
+                        peerPhone = altPhone;
+                    }
+                }
+            }
+
+            if (myPhone == null || peerPhone == null) {
+                Log.w("LT_DECRYPT", "myPhone or peerPhone is null! Aborting decryption.");
+                mainHandler.post(() -> {
+                    overlayManager.cleanupAllBubbles();
+                    decryptRunning = false;
+                });
+                if (root != null) root.recycle();
+                return;
+            }
+
+            // שליפת בועות טקסט
+            List<Pair<AccessibilityNodeInfo, Rect>> txtList = new ArrayList<>();
+            List<Pair<AccessibilityNodeInfo, Rect>> imgNodes = WhatsAppUtils.findImageBubbleButtons(root);
+            List<Pair<String, Rect>> imgLabels = WhatsAppUtils.findImageLabels(root);
+            DisplayMetrics displayMetrics = getResources().getDisplayMetrics();
+
+            for (AccessibilityNodeInfo n : WhatsAppUtils.findEncryptedMessages(root)) {
+                if (!n.isEditable()) {
+                    Rect b = new Rect();
+                    n.getBoundsInScreen(b);
+                    if (b.width() <= 0 || b.height() <= 0) {
+                        b = new Rect(50, 300, displayMetrics.widthPixels - 50, 400);
+                    }
+                    CharSequence t = n.getText();
+                    if (t != null) {
+                        Log.d("LT_DECRYPT", "Found encrypted text bubble: " + t.toString());
+                        txtList.add(new Pair<>(AccessibilityNodeInfo.obtain(n), b));
+                    }
+                    n.recycle();
+                }
+            }
+            if (root != null) root.recycle();
+
+            final List<Pair<AccessibilityNodeInfo, Rect>> finalTxtList = txtList;
+            final List<Pair<AccessibilityNodeInfo, Rect>> finalImgNodes = imgNodes;
+            final List<Pair<String, Rect>> finalImgLabels = imgLabels;
+            final String peerPhoneFinal = peerPhone;
+
+            executor.execute(() -> {
+                if (!isReallyInWhatsApp()) {
+                    Log.w("LT_DECRYPT", "No longer in WhatsApp. Stop decryption.");
+                    mainHandler.post(() -> {
+                        if (overlayManager != null) overlayManager.hide();
+                        stopContinuousDecryption();
+                    });
+                    return;
+                }
+
+                SharedPreferences fakeMap = getSharedPreferences(PREF_FAKE_MAP, MODE_PRIVATE);
+                SharedPreferences prefs = getSharedPreferences("LockTalkPrefs", MODE_PRIVATE);
+
+                Set<String> wantedIds = new HashSet<>();
+
+                // ===== פיענוח הודעות טקסט עם FakeMap =====
+                for (Pair<AccessibilityNodeInfo, Rect> p : finalTxtList) {
+                    final AccessibilityNodeInfo node = p.first;
+                    final Rect bounds = p.second;
+                    final CharSequence bubbleText = node.getText();
+                    final boolean outgoing = isOutgoingBubble(node, bounds);
+
+                    String cipherOrFake = (bubbleText != null) ? bubbleText.toString() : null;
+                    if (cipherOrFake == null || cipherOrFake.length() < 10) {
+                        Log.w("LT_DECRYPT", "Bubble too short or null: " + cipherOrFake);
+                        mainHandler.post(node::recycle);
+                        continue;
+                    }
+
+                    String actualCipher = fakeMap.contains(cipherOrFake)
+                            ? fakeMap.getString(cipherOrFake, null)
+                            : null;
+
+                    Log.d("LT_DECRYPT", "TextBubble: " + cipherOrFake + " | outgoing=" + outgoing + " | actualCipher: " + actualCipher);
+
+                    String id = OverlayManager.bubbleId(cipherOrFake, bounds, outgoing);
+                    wantedIds.add(id);
+
+                    String senderPhone = outgoing ? myPhone : peerPhoneFinal;
+                    String receiverPhone = outgoing ? peerPhoneFinal : myPhone;
+
+                    if (actualCipher == null) {
+                        Log.d("LT_DECRYPT", "No mapping in fakeMap, try fetch from Firebase");
+                        final AccessibilityNodeInfo nodeCopy = AccessibilityNodeInfo.obtain(node);
+                        fetchFakeMappingFromFirebase(myPhone, peerPhoneFinal, cipherOrFake, new FakeMapFetchCallback(){
+                            @Override
+                            public void onResult(String cipherFromCloud) {
+                                if (cipherFromCloud != null) {
+                                    fakeMap.edit().putString(cipherOrFake, cipherFromCloud).apply();
+                                    String plain = EncryptionHelper.decryptFromString(cipherFromCloud, senderPhone, receiverPhone);
+                                    Log.d("LT_DECRYPT", "Result from Firebase, decrypted: " + plain);
+                                    if (plain != null) {
+                                        mainHandler.post(() -> {
+                                            if (!isReallyInWhatsApp()) {
+                                                if (overlayManager != null) overlayManager.hide();
+                                                stopContinuousDecryption();
+                                                nodeCopy.recycle();
+                                                return;
+                                            }
+                                            overlayManager.showDecryptedOverlay(plain, nodeCopy, bounds, outgoing, id);
+                                            nodeCopy.recycle();
+                                        });
+                                    } else {
+                                        mainHandler.post(nodeCopy::recycle);
+                                    }
+                                } else {
+                                    Log.w("LT_DECRYPT", "No mapping found in Firebase for: " + cipherOrFake);
+                                    mainHandler.post(nodeCopy::recycle);
+                                }
+                            }
+                        });
+                        mainHandler.post(node::recycle); // משחרר את הנוד בלולאה המקורית
+                        continue;
+                    }
+
+                    String plain = EncryptionHelper.decryptFromString(actualCipher, senderPhone, receiverPhone);
+                    Log.d("LT_DECRYPT", "Decrypted: " + plain + " | using actualCipher: " + actualCipher + " | sender=" + senderPhone + " | receiver=" + receiverPhone);
+                    if (plain != null) {
+                        final AccessibilityNodeInfo nodeCopy = AccessibilityNodeInfo.obtain(node);
+                        mainHandler.post(() -> {
+                            if (!isReallyInWhatsApp()) {
+                                if (overlayManager != null) overlayManager.hide();
+                                stopContinuousDecryption();
+                                nodeCopy.recycle();
+                                return;
+                            }
+                            overlayManager.showDecryptedOverlay(plain, nodeCopy, bounds, outgoing, id);
+                            nodeCopy.recycle();
+                        });
+                    } else {
+                        Log.w("LT_DECRYPT", "Decryption failed (null) for: " + actualCipher);
+                        mainHandler.post(node::recycle);
+                    }
+                }
+
+                // פיענוח תמונות (שמרתי לוגים כמו בטקסט אם תרצה אוסיף)
+
+                mainHandler.post(() -> overlayManager.cleanupBubblesExcept(wantedIds));
+                mainHandler.post(() -> decryptRunning = false);
+
+                // רפרש קטן (אם נדרש)
+                if (!isRetryingDecrypt) {
+                    isRetryingDecrypt = true;
+                    mainHandler.postDelayed(() -> {
+                        isRetryingDecrypt = false;
+                        AccessibilityNodeInfo checkRoot = getRootInActiveWindow();
+                        String checkClass = (checkRoot != null && checkRoot.getClassName() != null) ? checkRoot.getClassName().toString() : "";
+                        if (!shouldHideDecryptionOverlays() && isConversationScreen(checkClass, checkRoot)) {
+                            decryptChatBubbles();
+                        }
+                        if (checkRoot != null) checkRoot.recycle();
+                    }, 220);
+                }
+            });
+        });
+    }
+
+
     public boolean isDecryptionTimerActive() {
         return decryptAuthenticated && System.currentTimeMillis() <= decryptExpiryTimestamp;
     }
@@ -738,45 +926,19 @@ public class MyAccessibilityService extends AccessibilityService {
         String currentClass = root.getClassName() != null ? root.getClassName().toString() : "";
         String lc = currentClass.toLowerCase();
 
-        // 1. לא בוואטסאפ? לא להציג!
-        if (!currentPackage.contains("com.whatsapp")) {
-            Log.d("LT", "shouldHideDecryptionOverlays: not WhatsApp (" + currentPackage + ")");
+        // רק בוואטסאפ (כל גרסה), אל תשתמש contains!
+        if (!currentPackage.startsWith("com.whatsapp")) {
+            Log.d("LT", "shouldHideDecryptionOverlays: not WhatsApp (currentPackage=" + currentPackage + ")");
             return true;
         }
-        // 2. אל תסתיר במסכי תצוגת תמונה/מדיה (gallery/media/photo/image/video view), תמשיך להציג!
+
+        // חריג: מסך מדיה – כן להציג overlay
         if (isMediaViewerScreen(lc)) {
             Log.d("LT", "shouldHideDecryptionOverlays: ALLOW in media viewer (" + currentClass + ")");
             return false;
         }
 
-        // 3. אם זו האפליקציה שלך או דיאלוג ב-whatsapp (כולל כל הדיאלוגים, פופאפים, בוחר קבצים, מצלמה, תפריט צף וכו')
-        if (
-                currentPackage.equals(getPackageName()) ||
-                        lc.contains("imagepicker") ||
-                        lc.contains("chooser") ||
-                        lc.contains("alertdialog") ||
-                        lc.contains("document") ||
-                        lc.contains("file") ||
-                        lc.contains("crop") ||
-                        lc.contains("popup") ||
-                        lc.contains("dialog") ||
-                        lc.contains("menu") ||
-                        lc.contains("picker") ||
-                        lc.contains("camera") ||
-                        lc.contains("activity") && (
-                                lc.contains("media") ||
-                                        lc.contains("camera") ||
-                                        lc.contains("file") ||
-                                        lc.contains("gallery") ||
-                                        lc.contains("document") ||
-                                        lc.contains("dialog")
-                        )
-        ) {
-            Log.d("LT", "shouldHideDecryptionOverlays: dialog/media/camera/gallery (" + currentClass + ")");
-            return true;
-        }
-
-        // בדיקה מול רשימת מחלקות דיאלוגים/בוחרים/דפדפנים וכו'
+        // מסכים/דיאלוגים אסורים (בתוך וואטסאפ)
         String[] forbiddenClasses = {
                 // דיאלוגים ובוחרים:
                 "chooser", "gallerypicker", "documentpicker", "filepicker", "imagepicker",
@@ -789,7 +951,7 @@ public class MyAccessibilityService extends AccessibilityService {
                 // דיאלוג מערכת:
                 "resolveractivity", "permissioncontrolleractivity",
                 // מסכים לא קשורים:
-                "contactpicker", "status", "share", "settings"
+                "contactpicker", "share"
         };
         for (String forbidden : forbiddenClasses) {
             if (lc.contains(forbidden)) {
@@ -798,20 +960,20 @@ public class MyAccessibilityService extends AccessibilityService {
             }
         }
 
-        // 4. אם יש מקלדת פתוחה
-        boolean keyboardVisible = isKeyboardProbablyVisible(root);
-        if (keyboardVisible) {
+        // בדיקת מקלדת פתוחה
+        if (isKeyboardProbablyVisible(root)) {
             Log.d("LT", "shouldHideDecryptionOverlays: keyboardVisible");
             return true;
         }
 
-        // 5. לא מסך שיחה? הגנה נוספת
+        // מסך לא שיחה?
         if (!isConversationScreen(currentClass, root)) {
             Log.d("LT", "shouldHideDecryptionOverlays: not WhatsApp conversation screen (" + currentClass + ")");
             return true;
         }
 
-        // ברירת מחדל - לא להסתיר
+        // ברירת מחדל: אל תסתיר
+        Log.d("LT", "shouldHideDecryptionOverlays: overlay allowed (" + currentClass + ")");
         return false;
     }
 
@@ -830,6 +992,55 @@ public class MyAccessibilityService extends AccessibilityService {
                 || lc.contains("media")
                 || lc.contains("image")
                 || lc.contains("video");
+    }
+    public interface FakeMapFetchCallback {
+        void onResult(String actualCipher);
+    }
+    public void fetchFakeMappingFromFirebase(String myPhone, String peerPhone, String fake, FakeMapFetchCallback callback) {
+        String docId1 = EncryptionHelper.normalizePhone(myPhone).replace("+972", "");
+        String docId2 = EncryptionHelper.normalizePhone(peerPhone).replace("+972", "");
+
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+
+        db.collection("users").document(docId1).collection("fakeMap")
+                .document(fake).get()
+                .addOnSuccessListener(doc -> {
+                    String cipher = extractCipherFromDoc(doc);
+                    if (cipher != null && !cipher.isEmpty()) {
+                        Log.d("LT_FIREBASE", "Found mapping in myPhone: " + docId1 + ", fake: " + fake);
+                        callback.onResult(cipher);
+                    } else {
+                        // לא נמצא אצל היוזר – ננסה אצל הצד השני
+                        db.collection("users").document(docId2).collection("fakeMap")
+                                .document(fake).get()
+                                .addOnSuccessListener(doc2 -> {
+                                    String cipher2 = extractCipherFromDoc(doc2);
+                                    if (cipher2 != null && !cipher2.isEmpty()) {
+                                        Log.d("LT_FIREBASE", "Found mapping in peerPhone: " + docId2 + ", fake: " + fake);
+                                        callback.onResult(cipher2);
+                                    } else {
+                                        Log.w("LT_FIREBASE", "No mapping found in Firebase for: " + fake);
+                                        callback.onResult(null);
+                                    }
+                                })
+                                .addOnFailureListener(e -> {
+                                    Log.e("LT_FIREBASE", "Firebase error (peer): " + e.getMessage());
+                                    callback.onResult(null);
+                                });
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    Log.e("LT_FIREBASE", "Firebase error (me): " + e.getMessage());
+                    callback.onResult(null);
+                });
+    }
+
+    // פונקציה עזר שמחלצת את המחרוזת מהדוקומנט (תומכת גם ב-actualCipher וגם ב-cipher)
+    private String extractCipherFromDoc(DocumentSnapshot doc) {
+        if (doc != null && doc.exists()) {
+            return doc.getString("encrypted");
+        }
+        return null;
     }
 
 
@@ -868,37 +1079,48 @@ public class MyAccessibilityService extends AccessibilityService {
             depth++;
         }
     }
-    // מזהה אם הבועה נשלחת (outgoing) לפי ה־resourceId/שם מחלקה של ההורה, או מיקום
     private boolean isOutgoingBubble(AccessibilityNodeInfo node, Rect bounds) {
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
+
+        // חיפוש במבנה ה-DOM לזיהוי כיוון על בסיס ID או class
         AccessibilityNodeInfo curr = node;
         for (int depth = 0; depth < 8 && curr != null; depth++) {
             String id = null, cls = null;
-            try { id = curr.getViewIdResourceName(); } catch (Exception ignore) {}
-            try { cls = curr.getClassName() != null ? curr.getClassName().toString() : ""; } catch (Exception ignore) {}
+            try {
+                id = curr.getViewIdResourceName();
+            } catch (Exception ignore) {}
+
+            try {
+                cls = curr.getClassName() != null ? curr.getClassName().toString() : "";
+            } catch (Exception ignore) {}
+
+            // בדיקת ID או class שמכילים "out" (הודעות יוצאות)
             if ((id != null && id.toLowerCase().contains("out")) ||
                     (cls != null && cls.toLowerCase().contains("out"))) {
                 if (curr != node) curr.recycle();
                 Log.d("LT_bubble", "FOUND OUTGOING id/cls: " + id + "/" + cls);
                 return true;
             }
+
+            // בדיקת ID או class שמכילים "in" (הודעות נכנסות)
             if ((id != null && id.toLowerCase().contains("in")) ||
                     (cls != null && cls.toLowerCase().contains("in"))) {
                 if (curr != node) curr.recycle();
                 Log.d("LT_bubble", "FOUND INCOMING id/cls: " + id + "/" + cls);
                 return false;
             }
+
             AccessibilityNodeInfo parent = curr.getParent();
             if (curr != node) curr.recycle();
             curr = parent;
         }
-        // שורת הקסם: outgoing אם left קטן יחסית לרוחב המסך (RTL)
-        boolean outgoing = bounds.left < (screenWidth * 0.5); // אפשר גם 0.4-0.45
-        Log.d("LT_bubble", "fallback by left: " + bounds.left + ", screenWidth: " + screenWidth + ", outgoing=" + outgoing);
+
+        // Fallback: בדיקה לפי מיקום - הודעות יוצאות בדרך כלל בצד ימין
+        // תיקון הלוגיקה: אם ההודעה בצד ימין של המסך = יוצאת
+        boolean outgoing = bounds.right > (screenWidth * 0.6);
+        Log.d("LT_bubble", "Fallback by position: right=" + bounds.right + ", screenWidth=" + screenWidth + ", outgoing=" + outgoing);
         return outgoing;
     }
-
-
     private String readQrFromBitmap(Bitmap bmp) {
         try {
             int width = bmp.getWidth(), height = bmp.getHeight();
@@ -921,16 +1143,21 @@ public class MyAccessibilityService extends AccessibilityService {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) return;
         String cs = WhatsAppUtils.getWhatsAppInputText(root);
+
+        String chatTitle = WhatsAppUtils.getCurrentChatTitle(root);
+        String peerPhone = WhatsAppUtils.getPhoneByPeerName(this, chatTitle);
         root.recycle();
-        if (!cs.endsWith("$")) return;
+
+        if (cs == null || !cs.endsWith("$")) return;
 
         String orig = cs.substring(0, cs.length() - 1);
         if (orig.isEmpty()) return;
 
-        SharedPreferences prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
-        String code = prefs.getString(PERSONAL_CODE_PREF, "");
-        if (code.isEmpty()) {
-            showToast("נא להגדיר קוד אישי");
+        SharedPreferences creds = getSharedPreferences("UserCredentials", MODE_PRIVATE);
+        String myPhone = creds.getString("myPhone", null);
+
+        if (myPhone == null || peerPhone == null) {
+            showToast("נא להגדיר מספרי טלפון");
             return;
         }
 
@@ -939,13 +1166,31 @@ public class MyAccessibilityService extends AccessibilityService {
 
         executor.execute(() -> {
             try {
-                String actualCipher = keystorePlugin.encryptToString(code, orig);
+                javax.crypto.SecretKey chatKey = EncryptionHelper.deriveChatKey(myPhone, peerPhone);
+                String actualCipher = EncryptionHelper.encryptToString(orig, chatKey);
+
+                if (actualCipher == null) {
+                    mainHandler.post(() -> showToast("שגיאה בהצפנה"));
+                    return;
+                }
+
                 String fake = generateFakeEncryptedText(actualCipher.length());
+                // שמירה ב-SharedPreferences
                 getSharedPreferences(PREF_FAKE_MAP, MODE_PRIVATE)
                         .edit().putString(fake, actualCipher).apply();
 
-                mainHandler.post(() -> {
+                // --- שמירה ב-Firebase אצל שני הצדדים --- //
+                String docIdSender = myPhone.replace("+972", "");
+                String docIdReceiver = peerPhone.replace("+972", "");
+                FirebaseFirestore db = FirebaseFirestore.getInstance();
 
+                FakeMapEntry entry = new FakeMapEntry(fake, actualCipher);
+                db.collection("users").document(docIdSender).collection("fakeMap")
+                        .document(fake).set(entry);
+                db.collection("users").document(docIdReceiver).collection("fakeMap")
+                        .document(fake).set(entry);
+
+                mainHandler.post(() -> {
                     AccessibilityNodeInfo r2 = getRootInActiveWindow();
                     if (r2 != null) {
                         TextInputUtils.performTextReplacement(
@@ -961,6 +1206,17 @@ public class MyAccessibilityService extends AccessibilityService {
             }
         });
     }
+    public class FakeMapEntry {
+        public String fake;
+        public String encrypted;
+        public FakeMapEntry() {}
+        public FakeMapEntry(String fake, String encrypted) {
+            this.fake = fake;
+            this.encrypted = encrypted;
+        }
+    }
+
+
     public boolean isReallyInWhatsApp() {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null || root.getPackageName() == null) return false;
@@ -990,9 +1246,9 @@ public class MyAccessibilityService extends AccessibilityService {
                     String enteredCode = input.getText().toString().trim();
 
                     SharedPreferences prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
-                    String userPhone = prefs.getString("currentUserPhone", null);
+                    String userPhone = prefs.getString("myPhone", null); // שינוי למפתח אחיד
 
-                    // קריאה ע"י מפתח פר משתמש
+                    // קריאה ע"י מפתח פר משתמש - עדיין נשמור קוד אישי לאימות
                     String realCode = prefs.getString("personalCode_" + userPhone, null);
                     if (realCode == null) realCode = prefs.getString("personalCode", null);
 
