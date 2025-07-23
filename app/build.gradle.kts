@@ -45,6 +45,7 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(platform(libs.firebase.bom))
+    implementation(libs.androidx.core.splashscreen)
     implementation (libs.firebase.auth)
     implementation (libs.androidx.exifinterface.v137)
     implementation (libs.google.firebase.firestore)
@@ -59,6 +60,7 @@ dependencies {
     implementation (libs.firebase.database)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+    implementation (libs.gson)
     implementation (libs.androidx.security.crypto.v110alpha03)
     implementation(libs.androidx.room.common)
     implementation (libs.material.v1110)

@@ -1,15 +1,10 @@
 package com.example.locktalk_01.utils;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
-import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.accessibility.AccessibilityNodeInfo;
-
 import java.util.List;
-
 public class TextInputUtils {
     private static final String TAG = "TextInputUtils";
 

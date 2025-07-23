@@ -7,4 +7,5 @@
     android:notificationTimeout="50"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
-    android:settingsActivity="com.example.activities.AccessibilityActivity"/>
+    android:settingsActivity="com.example.locktalk_01.activities.AccessibilityActivity"
+    />

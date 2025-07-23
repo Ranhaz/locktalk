@@ -48,13 +48,15 @@
 
         <!-- Splash / Launcher (רק הוא עם LAUNCHER) -->
         <activity
-            android:name="com.example.locktalk_01.activities.SplashActivity"
+            android:name=".activities.SplashActivity"
+            android:theme="@style/Theme.LockTalk.Transparent"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
 
         <!-- כל שאר האקטיביטיז - בשם מלא -->
         <activity android:name="com.example.locktalk_01.activities.EncryptionActivity" />

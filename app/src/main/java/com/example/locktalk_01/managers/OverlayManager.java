@@ -1,14 +1,12 @@
+
 package com.example.locktalk_01.managers;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
-import android.media.ExifInterface;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -17,29 +15,26 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
+import android.widget.ScrollView;
 import android.widget.TextView;
-
 import androidx.annotation.NonNull;
-
 import com.example.locktalk_01.R;
 import com.example.locktalk_01.services.MyAccessibilityService;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class OverlayManager {
     private static final String TAG = "OverlayManager";
@@ -71,13 +66,17 @@ public class OverlayManager {
     private TextView timerView;
     private View.OnClickListener originalClose;
 
-    private final Map<String, View> bubbleOverlays = new HashMap<>();
+    // שימוש ב-ConcurrentHashMap לבטיחות thread
+    private final Map<String, View> bubbleOverlays = new ConcurrentHashMap<>();
+    private final Set<String> imageOverlayIds = ConcurrentHashMap.newKeySet();
+    private final Map<String, Rect> overlayBounds = new ConcurrentHashMap<>(); // מעקב אחר bounds
     private final Handler ui = new Handler(Looper.getMainLooper());
     private Runnable timerTask;
     private int touchStartX, touchStartY;
     private View fullScreenImageOverlay = null;
 
     private static OverlayManager instance;
+    private volatile boolean isUpdatingVisibility = false; // מניעת עדכונים מקבילים
 
     public OverlayManager(@NonNull Context c) {
         ctx = c.getApplicationContext();
@@ -85,57 +84,65 @@ public class OverlayManager {
         instance = this;
     }
 
-    public static OverlayManager getInstance() { return instance; }
-
-    // בדיקה: האם פענוח פעיל (ע"פ טיימר)
     private boolean isDecryptionActive() {
         MyAccessibilityService svc = MyAccessibilityService.getInstance();
         return svc != null && svc.isDecryptionTimerActive();
+    }
+
+    public boolean hasImageOverlay(String imageKey) {
+        return imageOverlayIds.contains(imageKey) && bubbleOverlays.containsKey(imageKey);
     }
 
     @SuppressLint("ClickableViewAccessibility")
     public void show(View.OnClickListener pick, View.OnClickListener close, View.OnClickListener decrypt) {
         if (overlay != null) return;
 
-        overlay = LayoutInflater.from(ctx).inflate(R.layout.overlay_controls, null);
-        bPick = overlay.findViewById(R.id.overlaySelectImageButton);
-        bDec = overlay.findViewById(R.id.overlayDecryptButton);
-        bCls = overlay.findViewById(R.id.overlayCloseButton);
-        timerView = overlay.findViewById(R.id.timerTextView);
-        originalClose = close;
+        try {
+            overlay = LayoutInflater.from(ctx).inflate(R.layout.overlay_controls, null);
+            bPick = overlay.findViewById(R.id.overlaySelectImageButton);
+            bDec = overlay.findViewById(R.id.overlayDecryptButton);
+            bCls = overlay.findViewById(R.id.overlayCloseButton);
+            timerView = overlay.findViewById(R.id.timerTextView);
+            originalClose = close;
 
-        bPick.setOnClickListener(v -> {
-            updateOverlaysVisibility(); // מסתיר זמנית, לא מאפס את הטיימר!
-            if (pick != null) pick.onClick(v);
-        });
+            bPick.setOnClickListener(v -> {
+                updateOverlaysVisibility();
+                if (pick != null) pick.onClick(v);
+            });
 
-        bDec.setOnClickListener(decrypt);
-        bCls.setOnClickListener(close);
+            bDec.setOnClickListener(decrypt);
+            bCls.setOnClickListener(close);
 
-        timerView.setVisibility(View.GONE);
-        bCls.setVisibility(View.GONE);
+            timerView.setVisibility(View.GONE);
+            bCls.setVisibility(View.GONE);
 
-        lp = createControlLp(100, 200);
+            lp = createControlLp(100, 200);
 
-        overlay.setOnTouchListener((v, e) -> {
-            switch (e.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    touchStartX = (int) e.getRawX();
-                    touchStartY = (int) e.getRawY();
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    lp.x += (int) e.getRawX() - touchStartX;
-                    lp.y += (int) e.getRawY() - touchStartY;
-                    wm.updateViewLayout(overlay, lp);
-                    touchStartX = (int) e.getRawX();
-                    touchStartY = (int) e.getRawY();
-                    return true;
-            }
-            return false;
-        });
+            overlay.setOnTouchListener((v, e) -> {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        touchStartX = (int) e.getRawX();
+                        touchStartY = (int) e.getRawY();
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        lp.x += (int) e.getRawX() - touchStartX;
+                        lp.y += (int) e.getRawY() - touchStartY;
+                        try {
+                            wm.updateViewLayout(overlay, lp);
+                        } catch (Exception ignored) {}
+                        touchStartX = (int) e.getRawX();
+                        touchStartY = (int) e.getRawY();
+                        return true;
+                }
+                return false;
+            });
 
-        wm.addView(overlay, lp);
-        Log.d(TAG, "Overlay controls shown");
+            wm.addView(overlay, lp);
+            Log.d(TAG, "Overlay controls shown");
+        } catch (Exception e) {
+            Log.e(TAG, "Error showing overlay controls", e);
+            overlay = null;
+        }
     }
 
     private WindowManager.LayoutParams createControlLp(int x, int y) {
@@ -158,179 +165,277 @@ public class OverlayManager {
     }
 
     public void showImageOverlay(Bitmap bmp, Rect bounds) {
-        String uniqueId = "default_id";
+        String uniqueId = "default_id_" + System.currentTimeMillis();
         showDecryptedImageOverlay(bmp, bounds, uniqueId);
     }
 
     public void startTimer(long expiryTs, Runnable onExpire) {
         stopTimer();
-        timerView.setVisibility(View.VISIBLE);
-        bDec.setVisibility(View.GONE);
-        bCls.setVisibility(View.VISIBLE);
-        bCls.setOnClickListener(v -> { onExpire.run(); stopTimer(); });
+        if (timerView != null) {
+            timerView.setVisibility(View.VISIBLE);
+            bDec.setVisibility(View.GONE);
+            bCls.setVisibility(View.VISIBLE);
+            bCls.setOnClickListener(v -> {
+                onExpire.run();
+                stopTimer();
+            });
 
-        timerTask = new Runnable() {
-            @Override public void run() {
-                long ms = expiryTs - System.currentTimeMillis();
-                if (ms > 0) {
-                    int s = (int) (ms / 1000);
-                    timerView.setText(String.format(Locale.getDefault(), "%02d:%02d", s / 60, s % 60));
-                    ui.postDelayed(this, 1_000);
-                } else { onExpire.run(); stopTimer(); }
-            }
-        };
-        ui.post(timerTask);
-        Log.d(TAG, "Timer started until: " + expiryTs);
+            timerTask = new Runnable() {
+                @Override public void run() {
+                    long ms = expiryTs - System.currentTimeMillis();
+                    if (ms > 0) {
+                        int s = (int) (ms / 1000);
+                        if (timerView != null) {
+                            timerView.setText(String.format(Locale.getDefault(), "%02d:%02d", s / 60, s % 60));
+                        }
+                        ui.postDelayed(this, 1_000);
+                    } else {
+                        onExpire.run();
+                        stopTimer();
+                    }
+                }
+            };
+            ui.post(timerTask);
+            Log.d(TAG, "Timer started until: " + expiryTs);
+        }
     }
 
     public void stopTimer() {
-        if (timerTask != null) ui.removeCallbacks(timerTask);
-        timerTask = null;
+        if (timerTask != null) {
+            ui.removeCallbacks(timerTask);
+            timerTask = null;
+        }
 
-        timerView.setVisibility(View.GONE);
-        bDec.setVisibility(View.VISIBLE);
-        bCls.setVisibility(View.GONE);
-        bCls.setOnClickListener(originalClose);
+        if (timerView != null) {
+            timerView.setVisibility(View.GONE);
+            bDec.setVisibility(View.VISIBLE);
+            bCls.setVisibility(View.GONE);
+            bCls.setOnClickListener(originalClose);
+        }
         clearDecryptOverlays();
         Log.d(TAG, "Timer stopped");
     }
 
-    /** הגנה - מציג בועה רק בשיחה אמיתית */
     private boolean shouldShowOverlays() {
         MyAccessibilityService svc = MyAccessibilityService.getInstance();
         if (svc != null) {
             try {
                 return !svc.shouldHideDecryptionOverlays();
-            } catch (Exception e) { return false; }
+            } catch (Exception e) {
+                Log.w(TAG, "Error checking shouldShowOverlays", e);
+                return false;
+            }
         }
         return true;
     }
-    // מציג טקסט מפוענח על בועה
+
     public void showDecryptedOverlay(@NonNull String txt,
                                      @NonNull AccessibilityNodeInfo bubbleNode,
                                      @NonNull Rect bounds,
                                      boolean outgoing,
                                      @NonNull String id) {
-        Log.d("LT_BUBBLE", "showDecryptedOverlay called: id=" + id + ", text=" + txt + ", outgoing=" + outgoing);
+        Log.d("LT_BUBBLE", "showDecryptedOverlay called: id=" + id + ", text=" + txt.substring(0, Math.min(50, txt.length())) + "..., outgoing=" + outgoing);
+
+        // בדיקות יציבות מוקדמות
         if (!MyAccessibilityService.getInstance().isReallyInWhatsApp()) {
-            Log.d("LT_BUBBLE", "Not in WhatsApp, skipping overlay");
+            Log.d("LT_BUBBLE", "Not in WhatsApp, hiding bubbles");
             hideBubblesOnly();
             return;
         }
+
         if (bounds.width() <= 0 || bounds.height() <= 0) {
-            Log.e("LT_BUBBLE", "Invalid bounds for text overlay: " + bounds.toShortString());
+            Log.w("LT_BUBBLE", "Invalid bounds for text bubble: " + bounds.toShortString());
             return;
         }
+
         if (bubbleOverlays.containsKey(id)) {
-            Log.d("LT_BUBBLE", "Overlay already exists for id=" + id);
+            Log.d("LT_BUBBLE", "Text overlay already exists for id=" + id);
             return;
         }
-        View bubble = LayoutInflater.from(ctx).inflate(R.layout.overlay_bubble, null);
-        TextView tv = bubble.findViewById(R.id.bubbleText);
-        tv.setText(txt);
-        tv.setPadding(dp(12), dp(8), dp(12), dp(8));
-        tv.setTextSize(16f);
-        tv.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
 
-        if (outgoing) {
-            tv.setBackgroundResource(R.drawable.bg_bubble_out);
-        } else {
-            tv.setBackgroundResource(R.drawable.bg_bubble_in);
+        try {
+            int padPx = dp(4);
+
+            FrameLayout frame = new FrameLayout(ctx);
+            frame.setBackgroundColor(0x00000000);
+
+            ScrollView scrollView = new ScrollView(ctx);
+            scrollView.setFillViewport(true);
+
+            TextView tv = new TextView(ctx);
+            tv.setText(txt);
+            tv.setTextIsSelectable(true);
+            tv.setTextSize(16f);
+            tv.setTextColor(0xFF202020);
+            tv.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            tv.setPadding(dp(12), dp(8), dp(12), dp(8));
+
+            if (outgoing) {
+                tv.setBackgroundResource(R.drawable.bg_bubble_out);
+            } else {
+                tv.setBackgroundResource(R.drawable.bg_bubble_in);
+            }
+
+            scrollView.addView(tv, new ScrollView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            ));
+
+            frame.addView(scrollView, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+
+            Rect adjustedBounds = new Rect(
+                    bounds.left - padPx,
+                    bounds.top - padPx,
+                    bounds.right + padPx,
+                    bounds.bottom + padPx
+            );
+
+            addOverlay(frame, translucentLp(
+                    adjustedBounds.width(),
+                    adjustedBounds.height(),
+                    adjustedBounds.left,
+                    adjustedBounds.top
+            ), id);
+
+            overlayBounds.put(id, new Rect(bounds));
+            Log.d("LT_BUBBLE", "Text overlay created successfully: " + id);
+
+        } catch (Exception e) {
+            Log.e("LT_BUBBLE", "Error creating text overlay: " + id, e);
         }
-
-        addOverlay(bubble, translucentLp(bounds.width(), bounds.height(), bounds.left, bounds.top), id);
-        Log.d("LT_BUBBLE", "Text overlay shown: " + id);
-        updateOverlaysVisibility();
     }
 
-    // מציג תמונה מפוענחת על גבי התמונה המקורית
     public void showDecryptedImageOverlay(@NonNull Bitmap src, @NonNull Rect r, @NonNull String imageUniqueId) {
         Log.d("LT_IMG_DECRYPT", "showDecryptedImageOverlay called: id=" + imageUniqueId + ", rect=" + r.toShortString());
+
+        // בדיקות יציבות
         if (!MyAccessibilityService.getInstance().isReallyInWhatsApp()) {
             Log.d("LT_IMG_DECRYPT", "Not in WhatsApp, skipping overlay");
             hideBubblesOnly();
             return;
         }
+
         if (r.width() <= 0 || r.height() <= 0) {
             Log.e("LT_IMG_DECRYPT", "Invalid bounds for image overlay: " + r.toShortString());
             return;
         }
-        String id = imageUniqueId;
-        if (bubbleOverlays.containsKey(id)) {
-            Log.d("LT_IMG_DECRYPT", "Overlay already exists for id=" + id);
+
+        // בדיקה כפולה למניעת שכפולים
+        if (hasImageOverlay(imageUniqueId)) {
+            Log.d("LT_IMG_DECRYPT", "Image overlay already exists for id=" + imageUniqueId);
             return;
         }
-        // חיתוך
-        Bitmap cropped = src;
+
         try {
-            // חיתוך תמונה לגודל התמונה בלוגו (אם צריך)
-            if (src.getWidth() > r.width() || src.getHeight() > r.height()) {
-                float scaleX = (float) src.getWidth() / r.width();
-                float scaleY = (float) src.getHeight() / r.height();
-                int cropW = (int)(r.width() * scaleX);
-                int cropH = (int)(r.height() * scaleY);
+            // רישום המפתח
+            imageOverlayIds.add(imageUniqueId);
 
-                int cropX = Math.max(0, (src.getWidth() - cropW) / 2);
-                int cropY = Math.max(0, (src.getHeight() - cropH) / 2);
+            // יצירת תמונה מוקטנת/מותאמת
+            Bitmap scaledBitmap = createScaledBitmap(src, r);
 
-                if (cropX + cropW > src.getWidth()) cropW = src.getWidth() - cropX;
-                if (cropY + cropH > src.getHeight()) cropH = src.getHeight() - cropY;
+            ImageView iv = new ImageView(ctx);
+            iv.setImageBitmap(scaledBitmap);
+            iv.setScaleType(ImageView.ScaleType.MATRIX);
 
-                cropped = Bitmap.createBitmap(src, cropX, cropY, cropW, cropH);
-            }
+            // יצירת matrix למיקום מדויק
+            Matrix matrix = new Matrix();
+            matrix.setScale(
+                    (float) r.width() / scaledBitmap.getWidth(),
+                    (float) r.height() / scaledBitmap.getHeight()
+            );
+            iv.setImageMatrix(matrix);
+            iv.setAdjustViewBounds(false);
+
+            // פתיחה במסך מלא
+            iv.setOnClickListener(v -> showFullScreenImageOverlay(src));
+
+            addOverlay(iv, translucentLp(r.width(), r.height(), r.left, r.top), imageUniqueId);
+            overlayBounds.put(imageUniqueId, new Rect(r));
+
+            Log.d("LT_IMG_DECRYPT", "Image overlay created successfully: " + imageUniqueId);
+            updateOverlaysVisibility();
+
         } catch (Exception e) {
-            Log.e("LT_IMG_DECRYPT", "crop error", e);
-            cropped = src;
+            Log.e("LT_IMG_DECRYPT", "Error creating image overlay: " + imageUniqueId, e);
+            imageOverlayIds.remove(imageUniqueId);
         }
-
-        ImageView iv = new ImageView(ctx);
-        iv.setImageBitmap(cropped);
-        iv.setScaleType(ImageView.ScaleType.FIT_XY);
-
-        // פתיחה במסך מלא
-        iv.setOnClickListener(v -> showFullScreenImageOverlay(src));
-
-        addOverlay(iv, translucentLp(r.width(), r.height(), r.left, r.top), id);
-        Log.d("LT_IMG_DECRYPT", "Image overlay shown: " + id + " rect: " + r.toShortString());
-        updateOverlaysVisibility();
     }
 
-    // תמונה מפוענחת במסך מלא
+    private Bitmap createScaledBitmap(Bitmap src, Rect targetRect) {
+        try {
+            // חישוב יחס התמונה והמסגרת
+            float srcRatio = (float) src.getWidth() / src.getHeight();
+            float targetRatio = (float) targetRect.width() / targetRect.height();
+
+            int newWidth, newHeight;
+
+            if (srcRatio > targetRatio) {
+                // התמונה רחבה יותר - התאם לפי רוחב
+                newWidth = targetRect.width();
+                newHeight = Math.round(targetRect.width() / srcRatio);
+            } else {
+                // התמונה גבוהה יותר - התאם לפי גובה
+                newHeight = targetRect.height();
+                newWidth = Math.round(targetRect.height() * srcRatio);
+            }
+
+            // ודא שהגדלים חיוביים ולא גדולים מדי
+            newWidth = Math.max(1, Math.min(newWidth, targetRect.width()));
+            newHeight = Math.max(1, Math.min(newHeight, targetRect.height()));
+
+            return Bitmap.createScaledBitmap(src, newWidth, newHeight, true);
+
+        } catch (Exception e) {
+            Log.e("LT_IMG_DECRYPT", "Error scaling bitmap", e);
+            return src;
+        }
+    }
+
     public void showFullScreenImageOverlay(@NonNull Bitmap bmp) {
         hideFullScreenImage();
 
-        ImageView iv = new ImageView(ctx);
-        iv.setImageBitmap(bmp);
-        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        iv.setBackgroundColor(0xCC000000); // רקע כהה שקוף
-
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                PixelFormat.TRANSLUCENT
-        );
-        addTrustedFlag(lp);
-        lp.gravity = Gravity.CENTER;
-
-        iv.setOnClickListener(v -> hideFullScreenImage());
-
         try {
+            ImageView iv = new ImageView(ctx);
+            iv.setImageBitmap(bmp);
+            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            iv.setBackgroundColor(0xCC000000);
+
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                            ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                            : WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+            );
+            addTrustedFlag(lp);
+            lp.gravity = Gravity.CENTER;
+
+            iv.setOnClickListener(v -> hideFullScreenImage());
+
             wm.addView(iv, lp);
             fullScreenImageOverlay = iv;
+            Log.d(TAG, "Full screen image overlay shown");
+
         } catch (Exception e) {
-            Log.e(TAG, "showFullScreenImageOverlay", e);
+            Log.e(TAG, "Error showing full screen image overlay", e);
         }
     }
 
     public void hideFullScreenImage() {
         if (fullScreenImageOverlay != null) {
-            try { wm.removeViewImmediate(fullScreenImageOverlay); } catch (Exception ignore) {}
+            try {
+                wm.removeViewImmediate(fullScreenImageOverlay);
+                Log.d(TAG, "Full screen image overlay hidden");
+            } catch (Exception e) {
+                Log.w(TAG, "Error hiding full screen image", e);
+            }
             fullScreenImageOverlay = null;
         }
     }
@@ -339,28 +444,61 @@ public class OverlayManager {
         try {
             wm.addView(v, p);
             bubbleOverlays.put(id, v);
+            Log.d(TAG, "Overlay added: " + id);
         } catch (Exception e) {
-            Log.e(TAG, "addOverlay", e);
+            Log.e(TAG, "Error adding overlay: " + id, e);
         }
     }
 
     public void cleanupBubblesExcept(Set<String> keep) {
-        List<String> remove = new ArrayList<>();
-        for (String id : bubbleOverlays.keySet()) if (!keep.contains(id)) remove.add(id);
-        for (String id : remove) removeOverlay(id);
+        List<String> toRemove = new ArrayList<>();
+
+        for (String id : bubbleOverlays.keySet()) {
+            if (!keep.contains(id)) {
+                toRemove.add(id);
+            }
+        }
+
+        for (String id : toRemove) {
+            removeOverlay(id);
+        }
+
+        // ניקוי רשימות המעקב
+        imageOverlayIds.retainAll(keep);
+        overlayBounds.keySet().retainAll(keep);
+
+        Log.d(TAG, "Cleaned up " + toRemove.size() + " overlays, kept " + keep.size());
     }
 
     public void cleanupAllBubbles() {
-        List<String> remove = new ArrayList<>(bubbleOverlays.keySet());
-        for (String id : remove) removeOverlay(id);
+        List<String> allIds = new ArrayList<>(bubbleOverlays.keySet());
+        for (String id : allIds) {
+            removeOverlay(id);
+        }
+
+        imageOverlayIds.clear();
+        overlayBounds.clear();
+        Log.d(TAG, "All bubbles cleaned up");
     }
 
     private void removeOverlay(String id) {
         View v = bubbleOverlays.remove(id);
-        if (v != null) try { wm.removeView(v); } catch (Exception ignored) {}
+        if (v != null) {
+            try {
+                wm.removeView(v);
+                Log.d(TAG, "Overlay removed: " + id);
+            } catch (Exception e) {
+                Log.w(TAG, "Error removing overlay: " + id, e);
+            }
+        }
+
+        imageOverlayIds.remove(id);
+        overlayBounds.remove(id);
     }
 
-    public void clearDecryptOverlays() { cleanupBubblesExcept(Set.of()); }
+    public void clearDecryptOverlays() {
+        cleanupBubblesExcept(new HashSet<>());
+    }
 
     public static String bubbleId(String txt, Rect b, boolean out) {
         return (txt + "|" + b.toShortString() + "|" + out).hashCode() + "";
@@ -379,30 +517,13 @@ public class OverlayManager {
                 PixelFormat.TRANSLUCENT);
         addTrustedFlag(p);
         p.gravity = Gravity.TOP | Gravity.START;
-        p.x = x;  p.y = y;
+        p.x = x;
+        p.y = y;
         return p;
     }
 
-    private int dp(int v) { return Math.round(v * ctx.getResources().getDisplayMetrics().density); }
-
-    public static Bitmap decodeFileWithOrientation(@NonNull String path) {
-        try {
-            Bitmap bmp = BitmapFactory.decodeFile(path);
-            int o = new ExifInterface(path)
-                    .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
-            int rot = (o == ExifInterface.ORIENTATION_ROTATE_90) ? 90 :
-                    (o == ExifInterface.ORIENTATION_ROTATE_180) ? 180 :
-                            (o == ExifInterface.ORIENTATION_ROTATE_270) ? 270 : 0;
-            if (rot != 0 && bmp != null) {
-                Matrix m = new Matrix();
-                m.postRotate(rot);
-                bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
-            }
-            return bmp;
-        } catch (IOException e) {
-            Log.e(TAG, "decodeFileWithOrientation", e);
-            return null;
-        }
+    private int dp(int v) {
+        return Math.round(v * ctx.getResources().getDisplayMetrics().density);
     }
 
     public boolean isShown() {
@@ -414,68 +535,69 @@ public class OverlayManager {
         lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         lp.x = 0;
         lp.y = dp(24);
-        try { wm.updateViewLayout(overlay, lp); } catch (Exception ignore) {}
+        try {
+            wm.updateViewLayout(overlay, lp);
+        } catch (Exception e) {
+            Log.w(TAG, "Error updating overlay position", e);
+        }
     }
 
-    public void updatePosition(int x, int y) {
-        if (overlay == null || lp == null) return;
-        lp.x = x;
-        lp.y = y;
-        try { wm.updateViewLayout(overlay, lp); } catch (Exception ignore) {}
-    }
-
-    // *** קריטי: מסתיר רק את הפענוחים, לא את ה־Overlay ולא עוצר טיימר! ***
-    // מחביא זמנית רק את הבועות, לא מוחק אותן
     public void hideBubblesOnly() {
         for (Map.Entry<String, View> entry : bubbleOverlays.entrySet()) {
-            entry.getValue().setVisibility(View.GONE);
+            try {
+                entry.getValue().setVisibility(View.GONE);
+            } catch (Exception e) {
+                Log.w(TAG, "Error hiding bubble: " + entry.getKey(), e);
+            }
         }
         Log.d(TAG, "All bubbles hidden TEMPORARILY");
     }
 
-
-    // עוצר הכל לחלוטין (כולל טיימר ופיענוחים)
     public void hide() {
         cleanupAllBubbles();
         hideFullScreenImage();
+
         if (overlay != null) {
-            try { wm.removeViewImmediate(overlay); } catch (Exception ignore) {}
+            try {
+                wm.removeViewImmediate(overlay);
+            } catch (Exception e) {
+                Log.w(TAG, "Error removing overlay controls", e);
+            }
             overlay = null;
             lp = null;
         }
+
         stopTimer();
-        Log.d(TAG, "Overlay controls hidden (and all bubbles)");
+        Log.d(TAG, "Overlay manager hidden completely");
     }
 
-    // עדכון תצוגה לפי מצב אמיתי (מופעל כל מעבר)
     public void updateOverlaysVisibility() {
-        boolean shouldShow = shouldShowOverlays() && isDecryptionActive();
-        for (Map.Entry<String, View> entry : bubbleOverlays.entrySet()) {
-            entry.getValue().setVisibility(shouldShow ? View.VISIBLE : View.GONE);
-        }
-        Log.d(TAG, "updateOverlaysVisibility: " + (shouldShow ? "VISIBLE" : "GONE"));
-    }
+        if (isUpdatingVisibility) return;
 
-    public String copyOriginalImageFromUri(Uri srcUri) {
-        String fname = "orig_" + System.currentTimeMillis() + "_" + (int) (Math.random() * 9_999) + ".jpg";
-        File dir = new File(ctx.getFilesDir(), "locktalk");
-        if (!dir.exists()) dir.mkdirs();
-        File outFile = new File(dir, fname);
+        isUpdatingVisibility = true;
+        try {
+            boolean shouldShow = shouldShowOverlays() && isDecryptionActive();
+            int visibleCount = 0;
+            int hiddenCount = 0;
 
-        try (InputStream in = ctx.getContentResolver().openInputStream(srcUri);
-             OutputStream out = new FileOutputStream(outFile)) {
-
-            byte[] buf = new byte[8_192];
-            int n, total = 0;
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
-                total += n;
+            for (Map.Entry<String, View> entry : bubbleOverlays.entrySet()) {
+                try {
+                    View view = entry.getValue();
+                    if (view != null) {
+                        view.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
+                        if (shouldShow) visibleCount++;
+                        else hiddenCount++;
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Error updating visibility for: " + entry.getKey(), e);
+                }
             }
-            if (total == 0) return null;
-        } catch (Exception e) {
-            Log.e(TAG, "copyOriginalImageFromUri", e);
-            return null;
+
+            Log.d(TAG, "updateOverlaysVisibility: " + (shouldShow ? "VISIBLE" : "GONE") +
+                    " - visible: " + visibleCount + ", hidden: " + hiddenCount);
+
+        } finally {
+            isUpdatingVisibility = false;
         }
-        return outFile.getAbsolutePath();
     }
 }
