@@ -20,7 +20,7 @@ public class MainActivity extends AppCompatActivity {
 
         Log.d(TAG, "Accessibility enabled: " + isAccessibilityEnabled);
         Log.d(TAG, "Is logged in: " + isLoggedIn);
-
+ 
         Intent intent;
 
         // First check accessibility

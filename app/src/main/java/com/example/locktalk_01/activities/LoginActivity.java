@@ -15,6 +15,9 @@ import com.example.locktalk_01.R;
 import com.google.firebase.FirebaseException;
 import com.google.firebase.auth.*;
 import com.google.firebase.database.*;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.SetOptions;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -147,6 +150,13 @@ public class LoginActivity extends AppCompatActivity {
         progressBar.setVisibility(View.GONE);
     }
 
+    // ----------- פונקציה עזר לשמירת הטלפון ב-SharedPreferences -----------
+    private void saveMyPhoneToPrefs(String phone) {
+        SharedPreferences prefs = getSharedPreferences("UserCredentials", MODE_PRIVATE);
+        prefs.edit().putString("myPhone", phone).apply();
+        Log.d("LT_DEBUG", "Saved myPhone: " + phone);
+    }
+
     // ----------- הרשמה -----------
     private void sendVerificationCode() {
         String userInput = phoneInput.getText().toString().trim();
@@ -240,7 +250,6 @@ public class LoginActivity extends AppCompatActivity {
         PhoneAuthCredential credential = PhoneAuthProvider.getCredential(verificationId, code);
         verifyCodeWithCredential(credential, isResetPasswordMode);
     }
-
     private void verifyCodeWithCredential(PhoneAuthCredential credential, boolean isReset) {
         progressBar.setVisibility(View.VISIBLE);
         FirebaseAuth.getInstance().signInWithCredential(credential)
@@ -250,27 +259,41 @@ public class LoginActivity extends AppCompatActivity {
                         if (isReset) {
                             resetPasswordAfterVerification();
                         } else {
-                            // יוצרים יוזר בפיירבייס Auth
                             FirebaseAuth.getInstance().createUserWithEmailAndPassword(
                                     enteredPhone + "@locktalk.com", enteredPassword
                             ).addOnCompleteListener(createTask -> {
                                 if (createTask.isSuccessful()) {
-                                    // שמירת יוזר ב-Database (לניהול פנימי)
-                                    DatabaseReference ref = FirebaseDatabase.getInstance().getReference("users").child(enteredPhone);
+                                    saveMyPhoneToPrefs(enteredPhone);
+
+                                    // --- שמירת יוזר ב-Firestore ---
+                                    FirebaseFirestore db = FirebaseFirestore.getInstance();
                                     Map<String, Object> userData = new HashMap<>();
                                     userData.put("phone", enteredPhone);
-                                    userData.put("password", enteredPassword);
-                                    ref.setValue(userData).addOnSuccessListener(unused -> {
-                                        isLoginMode = true;
-                                        isWaitingForSms = false;
-                                        updateUI();
-                                        codeInput.setText("");
-                                        confirmPasswordInput.setText("");
-                                        passwordInput.setText("");
-                                        Toast.makeText(this, "נרשמת בהצלחה! נא להתחבר", Toast.LENGTH_LONG).show();
-                                    }).addOnFailureListener(e -> {
-                                        Toast.makeText(this, "שגיאה בשמירה במסד", Toast.LENGTH_SHORT).show();
-                                    });
+                                    userData.put("createdAt", System.currentTimeMillis());
+                                    // לא לשמור password אמיתי בפרודקשן!
+                                    // userData.put("password", enteredPassword);
+
+                                    // שמור את היוזר עם מזהה טלפון (ללא קידומת)
+                                    String docId = enteredPhone.replace("+972", "");
+                                    db.collection("users")
+                                            .document(docId)
+                                            .set(userData, SetOptions.merge())
+                                            .addOnSuccessListener(unused -> {
+                                                Log.d("LT_DEBUG", "Firestore: User saved successfully");
+
+                                                isLoginMode = true;
+                                                isWaitingForSms = false;
+                                                updateUI();
+                                                codeInput.setText("");
+                                                confirmPasswordInput.setText("");
+                                                passwordInput.setText("");
+                                                Toast.makeText(this, "נרשמת בהצלחה! נא להתחבר", Toast.LENGTH_LONG).show();
+                                                Log.d("LT_DEBUG", "Firestore: User saved successfully");
+                                            }).addOnFailureListener(e -> {
+                                                Toast.makeText(this, "שגיאה בשמירה במסד", Toast.LENGTH_SHORT).show();
+                                                Log.e("LT_DEBUG", "Firestore save failed: " + e.getMessage());
+
+                                            });
                                 } else {
                                     Toast.makeText(this, "שגיאה ביצירת משתמש: " + createTask.getException().getMessage(), Toast.LENGTH_LONG).show();
                                 }
@@ -282,7 +305,6 @@ public class LoginActivity extends AppCompatActivity {
                     }
                 });
     }
-
     // ----------- התחברות -----------
     private void loginFlow() {
         String userInput = phoneInput.getText().toString().trim();
@@ -300,7 +322,6 @@ public class LoginActivity extends AppCompatActivity {
 
         progressBar.setVisibility(View.VISIBLE);
 
-        // בדיקת התחברות ע"י אימות (Auth) ולא ע"י Database!
         FirebaseAuth.getInstance().signInWithEmailAndPassword(
                 enteredPhone + "@locktalk.com", enteredPassword
         ).addOnCompleteListener(task -> {
@@ -308,9 +329,10 @@ public class LoginActivity extends AppCompatActivity {
             if (task.isSuccessful()) {
                 Toast.makeText(this, "ברוך הבא!", Toast.LENGTH_SHORT).show();
 
-                // --------------- התיקון כאן ---------------
-                new AccessibilityManager(this).setLoggedIn(true);
+                // ---------- שמור את המספר שלך ב-SharedPreferences ----------
+                saveMyPhoneToPrefs(enteredPhone);
 
+                new AccessibilityManager(this).setLoggedIn(true);
                 startActivity(new Intent(this, EncryptionActivity.class));
                 finish();
             } else {
@@ -330,8 +352,11 @@ public class LoginActivity extends AppCompatActivity {
         enteredPhone = fullPhone;
 
         progressBar.setVisibility(View.VISIBLE);
-        DatabaseReference ref = FirebaseDatabase.getInstance().getReference("users").child(fullPhone);
-        ref.get().addOnSuccessListener(snapshot -> {
+
+        // שליפת המשתמש מ-Firestore
+        String docId = fullPhone.replace("+972", "");
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+        db.collection("users").document(docId).get().addOnSuccessListener(snapshot -> {
             progressBar.setVisibility(View.GONE);
             if (!snapshot.exists()) {
                 Toast.makeText(LoginActivity.this, "המספר לא רשום במערכת", Toast.LENGTH_LONG).show();
@@ -346,6 +371,7 @@ public class LoginActivity extends AppCompatActivity {
             Toast.makeText(LoginActivity.this, "שגיאה בגישה לשרת", Toast.LENGTH_SHORT).show();
         });
     }
+
 
     private void startPasswordResetVerification(String phone) {
         progressBar.setVisibility(View.VISIBLE);
@@ -396,8 +422,13 @@ public class LoginActivity extends AppCompatActivity {
                     FirebaseAuth.getInstance().getCurrentUser()
                             .updatePassword(newPassword)
                             .addOnSuccessListener(aVoid -> {
-                                DatabaseReference ref = FirebaseDatabase.getInstance().getReference("users").child(enteredPhone);
-                                ref.child("password").setValue(newPassword);
+                                // עדכון שדה ב-Firestore
+                                String docId = enteredPhone.replace("+972", "");
+                                FirebaseFirestore db = FirebaseFirestore.getInstance();
+                                Map<String, Object> update = new HashMap<>();
+                                // לא לשמור סיסמה אמיתית במבנה אמיתי!
+                                // update.put("password", newPassword);
+                                db.collection("users").document(docId).update(update);
                                 Toast.makeText(this, "הסיסמה אופסה בהצלחה!", Toast.LENGTH_SHORT).show();
                                 isLoginMode = true;
                                 isResetPasswordMode = false;
@@ -418,3 +449,4 @@ public class LoginActivity extends AppCompatActivity {
         builder.show();
     }
 }
+

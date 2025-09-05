@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
 
 
     <!-- הרשאות לאחסון (לגרסאות ישנות) -->
@@ -47,13 +49,15 @@
 
         <!-- Splash / Launcher (רק הוא עם LAUNCHER) -->
         <activity
-            android:name="com.example.locktalk_01.activities.SplashActivity"
+            android:name=".activities.SplashActivity"
+            android:theme="@style/Theme.LockTalk.Transparent"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
 
         <!-- כל שאר האקטיביטיז - בשם מלא -->
         <activity android:name="com.example.locktalk_01.activities.EncryptionActivity" />

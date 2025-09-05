@@ -1,22 +1,40 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:orientation="vertical" android:padding="24dp"
     android:layout_width="match_parent" android:layout_height="match_parent">
+
+    <EditText
+        android:id="@+id/myPhoneInput"
+        android:hint="מספר הטלפון שלך (ללא קידומת 0)"
+        android:inputType="phone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
+    <EditText
+        android:id="@+id/peerPhoneInput"
+        android:hint="מספר טלפון של הנמען (ללא קידומת 0)"
+        android:inputType="phone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
     <EditText
         android:id="@+id/decryptCodeInput"
         android:hint="קוד אישי"
         android:inputType="numberPassword"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"/>
+
     <Button
         android:id="@+id/pickEncryptedFileBtn"
         android:text="בחר קובץ מוצפן"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"/>
+
     <Button
         android:id="@+id/decryptBtn"
         android:text="פענח"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"/>
+
     <ImageView
         android:id="@+id/decryptedImageView"
         android:layout_width="match_parent"

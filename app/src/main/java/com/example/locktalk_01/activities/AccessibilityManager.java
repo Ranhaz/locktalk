@@ -45,11 +45,6 @@ public class AccessibilityManager {
         Log.d("AccessibilityManager", "setLoggedIn = " + v);
         prefs().edit().putBoolean(KEY_LOGGED_IN, v).apply();
     }
-
-    /** helper used mainly for tests */
-    public void clearLoginStatus() { setLoggedIn(false); }
-
-    /* ---------------------------------------------------- */
     private SharedPreferences prefs() {
         return ctx.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
     }

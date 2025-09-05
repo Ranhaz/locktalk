@@ -13,14 +13,14 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Log;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 import android.graphics.Matrix;
 import android.media.ExifInterface;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
+
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -29,28 +29,26 @@ import androidx.core.content.FileProvider;
 
 import com.example.locktalk_01.R;
 import com.example.locktalk_01.services.MyAccessibilityService;
+import com.google.firebase.firestore.FirebaseFirestore;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 public class ImagePickerProxyActivity extends AppCompatActivity {
     private static final String PREF_LOGO_SET = "logoUris";
-    private static final String PREF_LABEL_COUNTER = "imgLabelCounter";
     private Uri cameraImageUri;
-
     private static final int REQUEST_CAMERA_PERMISSION = 111;
-
-    // ==== Dialog state ====
     private static boolean dialogOpen = false;
     public static boolean isDialogOpen() { return dialogOpen; }
     private static void setDialogOpen(boolean open) { dialogOpen = open; }
-
-    // תוצאה מהגלריה
     private final ActivityResultLauncher<Intent> galleryLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
                 if (result.getResultCode() == RESULT_OK && result.getData() != null) {
@@ -59,8 +57,6 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
                     finish();
                 }
             });
-
-    // תוצאה מהמצלמה
     private final ActivityResultLauncher<Intent> cameraLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
                 if (result.getResultCode() == RESULT_OK && cameraImageUri != null) {
@@ -73,25 +69,19 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
             });
 
     @Override
-    protected void onCreate(@Nullable Bundle savedInstanceState) {
+    protected void onCreate( Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setDialogOpen(true);
-
-        // Hide overlays while dialog is open
         MyAccessibilityService svc = MyAccessibilityService.getInstance();
         if (svc != null && svc.overlayManager != null) {
             svc.overlayManager.hideBubblesOnly();
         }
-
-        // אם אין הרשאת מצלמה – בקש
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION);
             return;
         }
         showImagePickDialog();
     }
-
-    /** דיאלוג בחירת פעולה (גלריה/מצלמה) **/
     private void showImagePickDialog() {
         boolean hasCameraPerm = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
         String[] options = hasCameraPerm ? new String[]{"בחר מהגלריה", "צלם תמונה"} : new String[]{"בחר מהגלריה"};
@@ -104,17 +94,13 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
                 })
                 .setOnCancelListener(dialog -> finish())
                 .show();
-
-        // הסתרה יזומה (במקרה שהדיאלוג נפתח אחרי ה-onCreate)
         MyAccessibilityService svc = MyAccessibilityService.getInstance();
         if (svc != null && svc.overlayManager != null) {
             svc.overlayManager.hideBubblesOnly();
         }
     }
-
-
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode,  String[] permissions,  int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_CAMERA_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
@@ -125,19 +111,16 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
             }
         }
     }
-
     @Override
     protected void onDestroy() {
         super.onDestroy();
         setDialogOpen(false);
     }
-
     @Override
     public void finish() {
         setDialogOpen(false);
         super.finish();
     }
-
     private void pickFromGallery() {
         Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
         pick.setType("image/*");
@@ -199,17 +182,59 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
 
     private void handleUrisForSending(ArrayList<Uri> picked) {
         SharedPreferences prefs = getSharedPreferences("LockTalkPrefs", MODE_PRIVATE);
+        Set<String> pendingKeys = new HashSet<>(prefs.getStringSet("pending_image_keys", new HashSet<>()));
         Set<String> logos = new HashSet<>(prefs.getStringSet(PREF_LOGO_SET, new HashSet<>()));
-        int labelCounter = prefs.getInt(PREF_LABEL_COUNTER, 1);
 
-        for (int i = 0; i < picked.size(); i++) {
-            Uri src = picked.get(i);
+        SharedPreferences creds = getSharedPreferences("UserCredentials", MODE_PRIVATE);
+        String myPhone = creds.getString("myPhone", null);
+
+        String chatTitle = prefs.getString("lastChatTitle", null);
+        if (chatTitle == null || chatTitle.isEmpty()) {
+            MyAccessibilityService svc = MyAccessibilityService.getInstance();
+            AccessibilityNodeInfo root = svc != null ? svc.getRootInActiveWindow() : null;
+            if (root != null) {
+                chatTitle = com.example.locktalk_01.utils.WhatsAppUtils.getCurrentChatTitle(root);
+                if (chatTitle != null && !chatTitle.isEmpty()) {
+                    prefs.edit().putString("lastChatTitle", chatTitle).apply();
+                }
+                root.recycle();
+            }
+        }
+        if (chatTitle == null || chatTitle.isEmpty()) {
+            Toast.makeText(this, "לא נמצא שם שיחה נוכחית. פתח/י שיחה בוואטסאפ לפני שליחת תמונה.", Toast.LENGTH_LONG).show();
+            Log.e("ImagePickerProxy", "No chat title found. Exiting.");
+            finish();
+            return;
+        }
+
+        String peerPhone = com.example.locktalk_01.utils.WhatsAppUtils.getPhoneByPeerName(this, chatTitle);
+        if (peerPhone == null || peerPhone.isEmpty()) {
+            peerPhone = com.example.locktalk_01.utils.WhatsAppUtils.findPhoneInContacts(this, chatTitle);
+            if (peerPhone != null) {
+                getSharedPreferences("PeerNames", MODE_PRIVATE)
+                        .edit()
+                        .putString(com.example.locktalk_01.utils.WhatsAppUtils.normalizeChatTitle(chatTitle), peerPhone)
+                        .apply();
+                peerPhone = com.example.locktalk_01.utils.WhatsAppUtils.getPhoneByPeerName(this, chatTitle);
+            }
+        }
+        if (peerPhone == null || peerPhone.isEmpty()) {
+            Toast.makeText(this, "לא נמצא מספר טלפון של הצד השני בשיחה: " + chatTitle, Toast.LENGTH_LONG).show();
+            Log.e("ImagePickerProxy", "No peer phone found for chat: " + chatTitle);
+            finish();
+            return;
+        }
+
+        ArrayList<Uri> allPlaceholders = new ArrayList<>();
+        ArrayList<String> allImageKeys = new ArrayList<>();
+
+        final int MAX_IMAGE_DIM = 1280;
+        final int MAX_FIRESTORE_ENC_IMAGE = 950_000; // אל תחרוג ממיליון בייט
+
+        for (Uri src : picked) {
             try {
-                String imgLabel = "img" + labelCounter;
                 Bitmap original = null;
                 String origPath = null;
-
-                // קרא את התמונה מהמצלמה או מהגלריה
                 if (cameraImageUri != null && src.equals(cameraImageUri)) {
                     File photoFile = new File(getExternalFilesDir(Environment.DIRECTORY_PICTURES),
                             cameraImageUri.getLastPathSegment());
@@ -222,61 +247,140 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
                         original = BitmapFactory.decodeFile(origPath);
                         original = fixImageOrientation(null, origPath, original);
                     } else {
-                        InputStream in = getContentResolver().openInputStream(src);
-                        original = BitmapFactory.decodeStream(in);
-                        // אין תקיה ל־origPath, רק bitmap.
+                        try (InputStream in = getContentResolver().openInputStream(src)) {
+                            if (in != null) {
+                                original = BitmapFactory.decodeStream(in);
+                            }
+                        }
                     }
                 }
-                if (original == null) continue;
+                if (original == null) {
+                    Log.e("ImagePickerProxy", "original bitmap is null for uri: " + src);
+                    continue;
+                }
 
-                // שמירת קובץ מקורי מוצפן בתיקיית app (לא בגלריה)
+                // 1. הקטנה אוטומטית (אם צריך)
+                original = com.example.locktalk_01.utils.EncryptionHelper.scaleDownIfNeeded(original, MAX_IMAGE_DIM);
+
+                String imageKey = com.example.locktalk_01.utils.EncryptionHelper.generateImageKey(original);
+
+                // 2. שמירה מקורית (compressed 94 במקום 98)
                 File dir = new File(getFilesDir(), "locktalk");
                 if (!dir.exists()) dir.mkdirs();
                 File orig = File.createTempFile("orig_", ".jpg", dir);
                 try (OutputStream out = new FileOutputStream(orig)) {
-                    original.compress(Bitmap.CompressFormat.JPEG, 98, out);
+                    original.compress(Bitmap.CompressFormat.JPEG, 94, out);
+                }
+                pendingKeys.add(imageKey);
+                prefs.edit()
+                        .putStringSet("pending_image_keys", pendingKeys)
+                        .putString("origPath_for_" + imageKey, orig.getAbsolutePath())
+                        .apply();
+
+                // 3. הכנה להצפנה (compressed 94 במקום 98)
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                original.compress(Bitmap.CompressFormat.JPEG, 94, baos);
+                byte[] plainBytes = baos.toByteArray();
+
+                // 4. הצפנה
+                byte[] encBytes = com.example.locktalk_01.utils.EncryptionHelper.encryptImage(plainBytes, myPhone, peerPhone);
+
+                // 5. בדיקת מגבלת גודל - אם חריג, לא לשלוח!
+                if (encBytes.length > MAX_FIRESTORE_ENC_IMAGE) {
+                    Toast.makeText(this, "תמונה גדולה מדי לשליחה מוצפנת. יש לבחור תמונה קטנה/להקטין רזולוציה.", Toast.LENGTH_LONG).show();
+                    Log.e("ImagePickerProxy", "Encrypted image too large (" + encBytes.length + ")");
+                    continue; // דלג על התמונה הזאת
                 }
 
-                // יצירת לוגו בגודל התמונה
-                Bitmap logoBmp = BitmapFactory.decodeResource(getResources(), R.drawable.locktalk_logo);
-                Bitmap scaledLogo = Bitmap.createScaledBitmap(logoBmp, original.getWidth(), original.getHeight(), true);
+                String base64Cipher = android.util.Base64.encodeToString(encBytes, android.util.Base64.NO_WRAP);
+                Map<String, Object> entry = new HashMap<>();
+                entry.put("encrypted", base64Cipher);
+                entry.put("outgoing", true);
+                entry.put("senderPhone", myPhone);
 
-                // שמירת placeholder מחוץ לגלריה
+                String docIdSender = myPhone.replace("+972", "");
+                String docIdReceiver = peerPhone.replace("+972", "");
+
+                FirebaseFirestore db = FirebaseFirestore.getInstance();
+                db.collection("users").document(docIdSender).collection("imageMap")
+                        .document(imageKey).set(entry);
+                db.collection("users").document(docIdReceiver).collection("imageMap")
+                        .document(imageKey).set(entry);
+
+                Bitmap logoBmp = BitmapFactory.decodeResource(getResources(), R.drawable.fakeimg);
+                Bitmap scaledLogo = Bitmap.createScaledBitmap(logoBmp, original.getWidth(), original.getHeight(), true);
                 File extDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
                 if (extDir != null && !extDir.exists()) extDir.mkdirs();
                 File placeholderFile = File.createTempFile("locktalk_placeholder_", ".jpg", extDir);
                 try (OutputStream out = new FileOutputStream(placeholderFile)) {
-                    scaledLogo.compress(Bitmap.CompressFormat.JPEG, 98, out);
+                    scaledLogo.compress(Bitmap.CompressFormat.JPEG, 94, out);
                 }
+                writeKeyToExif(placeholderFile, imageKey);
+
                 Uri placeholderUri = FileProvider.getUriForFile(this, getPackageName() + ".provider", placeholderFile);
-
                 logos.add(placeholderUri.toString());
-                SharedPreferences creds = getSharedPreferences("UserCredentials", MODE_PRIVATE);
-                String currentPersonalCode = creds.getString("personalCode", "");
-
                 prefs.edit()
                         .putStringSet(PREF_LOGO_SET, logos)
-                        .putString("origPath_for_" + imgLabel, orig.getAbsolutePath())
                         .putString("pendingImageUri", placeholderUri.toString())
-                        .putString("personalCode_for_" + imgLabel, currentPersonalCode)
                         .apply();
 
                 MyAccessibilityService svc = MyAccessibilityService.getInstance();
                 if (svc != null) svc.setEncryptedImageUri(placeholderUri.toString());
 
-                // שליחת התמונה לווטסאפ עם קפצ'ן (תווית)
-                sendImageWithCaption(placeholderUri, imgLabel);
+                allPlaceholders.add(placeholderUri);
+                allImageKeys.add(imageKey);
 
-                labelCounter++;
             } catch (Exception ex) {
                 Log.e("ImagePickerProxy", "שגיאה בשמירה ובמיפוי", ex);
-                // ממשיכים הלאה, לא יוצאים מהלולאה
             }
         }
-        prefs.edit().putInt(PREF_LABEL_COUNTER, labelCounter).apply();
+        // שליחה מרוכזת
+        if (!allPlaceholders.isEmpty()) {
+            prefs.edit().putString("last_batch_image_keys", String.join(",", allImageKeys)).apply();
+            if (allPlaceholders.size() == 1) {
+                sendSingleImageWithCaption(allPlaceholders.get(0), allImageKeys.get(0));
+            } else {
+                sendMultipleImagesWithCaptions(allPlaceholders, allImageKeys);
+            }
+        } else {
+            setDialogOpen(false);
+            finish();
+        }
+    }
+    private void sendSingleImageWithCaption(Uri imageUri, String imageKey) {
+        MyAccessibilityService svc = MyAccessibilityService.getInstance();
+        if (svc != null) {
+            ArrayList<Uri> singleUri = new ArrayList<>();
+            ArrayList<String> singleKey = new ArrayList<>();
+            singleUri.add(imageUri);
+            singleKey.add(imageKey);
+            svc.queueImagesForSequentialSending(singleUri, singleKey);
+        }
+
         setDialogOpen(false);
         finish();
     }
+
+    private void sendMultipleImagesWithCaptions(ArrayList<Uri> imageUris, ArrayList<String> imageKeys) {
+        MyAccessibilityService svc = MyAccessibilityService.getInstance();
+        if (svc != null) {
+            svc.queueImagesForSequentialSending(imageUris, imageKeys);
+        }
+
+        setDialogOpen(false);
+        finish();
+    }
+
+    public static void writeKeyToExif(File imageFile, String imageKey) {
+        try {
+            ExifInterface exif = new ExifInterface(imageFile.getAbsolutePath());
+            exif.setAttribute(ExifInterface.TAG_USER_COMMENT, imageKey); // אפשר גם TAG_IMAGE_DESCRIPTION
+            exif.saveAttributes();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
 
     public static Bitmap fixImageOrientation(InputStream imageStream, String imagePath, Bitmap bitmap) {
         try {
@@ -311,7 +415,6 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
             return bitmap;
         }
     }
-
     private void sendImageWithCaption(Uri imageUri, String caption) {
         Intent sendIntent = new Intent();
         sendIntent.setAction(Intent.ACTION_SEND);
@@ -330,7 +433,6 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
         setDialogOpen(false);
         finish();
     }
-
     public static String getPath(Context context, Uri uri) {
         String[] projection = {MediaStore.Images.Media.DATA};
         Cursor cursor = context.getContentResolver().query(uri, projection, null, null, null);
