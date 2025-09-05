@@ -20,8 +20,7 @@ import android.media.ExifInterface;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
+
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -70,7 +69,7 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
             });
 
     @Override
-    protected void onCreate(@Nullable Bundle savedInstanceState) {
+    protected void onCreate( Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setDialogOpen(true);
         MyAccessibilityService svc = MyAccessibilityService.getInstance();
@@ -101,7 +100,7 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
         }
     }
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode,  String[] permissions,  int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_CAMERA_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
@@ -308,7 +307,7 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
                 db.collection("users").document(docIdReceiver).collection("imageMap")
                         .document(imageKey).set(entry);
 
-                Bitmap logoBmp = BitmapFactory.decodeResource(getResources(), R.drawable.locktalk_logo2);
+                Bitmap logoBmp = BitmapFactory.decodeResource(getResources(), R.drawable.fakeimg);
                 Bitmap scaledLogo = Bitmap.createScaledBitmap(logoBmp, original.getWidth(), original.getHeight(), true);
                 File extDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
                 if (extDir != null && !extDir.exists()) extDir.mkdirs();
@@ -349,35 +348,25 @@ public class ImagePickerProxyActivity extends AppCompatActivity {
         }
     }
     private void sendSingleImageWithCaption(Uri imageUri, String imageKey) {
-        Intent sendIntent = new Intent();
-        sendIntent.setAction(Intent.ACTION_SEND);
-        sendIntent.setType("image/jpeg");
-        sendIntent.putExtra(Intent.EXTRA_STREAM, imageUri);
-        sendIntent.putExtra(Intent.EXTRA_TEXT, imageKey);
-        // אל תגדיר setPackage("com.whatsapp");
-        sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        MyAccessibilityService svc = MyAccessibilityService.getInstance();
+        if (svc != null) {
+            ArrayList<Uri> singleUri = new ArrayList<>();
+            ArrayList<String> singleKey = new ArrayList<>();
+            singleUri.add(imageUri);
+            singleKey.add(imageKey);
+            svc.queueImagesForSequentialSending(singleUri, singleKey);
+        }
 
-        startActivity(Intent.createChooser(sendIntent, "שתף תמונה"));
         setDialogOpen(false);
         finish();
     }
 
     private void sendMultipleImagesWithCaptions(ArrayList<Uri> imageUris, ArrayList<String> imageKeys) {
-        Intent sendIntent = new Intent();
-        sendIntent.setAction(Intent.ACTION_SEND_MULTIPLE);
-        sendIntent.setType("image/jpeg");
-        sendIntent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, imageUris);
-
-        // צור כיתוב ממוספר לכל תמונה
-        StringBuilder caption = new StringBuilder();
-        for (int i = 0; i < imageKeys.size(); i++) {
-            caption.append(i + 1).append(": ").append(imageKeys.get(i)).append("\n");
+        MyAccessibilityService svc = MyAccessibilityService.getInstance();
+        if (svc != null) {
+            svc.queueImagesForSequentialSending(imageUris, imageKeys);
         }
-        sendIntent.putExtra(Intent.EXTRA_TEXT, caption.toString().trim());
-        // אל תגדיר setPackage("com.whatsapp");
-        sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
-        startActivity(Intent.createChooser(sendIntent, "שתף תמונות"));
         setDialogOpen(false);
         finish();
     }

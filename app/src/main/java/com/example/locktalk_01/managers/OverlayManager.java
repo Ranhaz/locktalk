@@ -1,16 +1,24 @@
-
 package com.example.locktalk_01.managers;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Matrix;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Spannable;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.method.LinkMovementMethod;
+import android.text.style.ClickableSpan;
 import android.util.Log;
+import android.util.Patterns;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -18,14 +26,17 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.accessibilityservice.GestureDescription;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import androidx.annotation.NonNull;
+import android.widget.Toast;
+
 import com.example.locktalk_01.R;
 import com.example.locktalk_01.services.MyAccessibilityService;
+
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -56,8 +67,48 @@ public class OverlayManager {
         } catch (Throwable ignored) {}
     }
 
-    private final Context ctx;
+    // NEW: מזהה טקסט יציב בלי תלות ב-bounds
+    public static String stableTextId(String rawCipherOrFake, boolean outgoing) {
+        String base = (rawCipherOrFake == null ? "" : rawCipherOrFake);
+        String key = base + "|" + outgoing;
+        return Integer.toHexString(key.hashCode());
+    }
+
+    // DEPRECATED: השארה למניעת שגיאות קומפילציה אם עדיין נקרא איפשהו
+    @Deprecated
+    public static String bubbleId(String txt, Rect b, boolean out) {
+        return stableTextId(txt, out);
+    }
+
+    // ADD: פיוס מיקומים – מעדכן מיקומים קיימים, יוצר/מסיר רק כשצריך
+    public void reconcilePositions(Map<String, Rect> latest) {
+        if (latest == null) latest = new HashMap<>();
+
+        // עדכוני מיקום מהירים (ללא יצירה/מחיקה)
+        for (Map.Entry<String, Rect> e : latest.entrySet()) {
+            String id = e.getKey();
+            Rect r = e.getValue();
+            if (bubbleOverlays.containsKey(id)) {
+                try {
+                    View v = bubbleOverlays.get(id);
+                    if (v != null && r != null) {
+                        WindowManager.LayoutParams lp = translucentLp(r.width(), r.height(), r.left, r.top);
+                        wm.updateViewLayout(v, lp);
+                        overlayBounds.put(id, new Rect(r));
+                    }
+                } catch (Exception ex) {
+                    Log.w(TAG, "reconcilePositions: update failed id=" + id, ex);
+                }
+            }
+        }
+
+        // הסרת עודפים – כל מה שלא ב-latest יוסר
+        cleanupBubblesExcept(latest.keySet());
+    }
+
+    private final Context ctx;                       // Application Context להצגת ה־Views
     private final WindowManager wm;
+    private final MyAccessibilityService service;    // רפרנס לשירות כדי לבצע dispatchGesture
 
     private View overlay;
     private WindowManager.LayoutParams lp;
@@ -78,9 +129,11 @@ public class OverlayManager {
     private static OverlayManager instance;
     private volatile boolean isUpdatingVisibility = false; // מניעת עדכונים מקבילים
 
-    public OverlayManager(@NonNull Context c) {
-        ctx = c.getApplicationContext();
-        wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
+    public OverlayManager(Context c) {
+        // נשמור גם את ה-Service (אם מגיע ישירות מהשירות), וגם את ה-ApplicationContext
+        this.service = (c instanceof MyAccessibilityService) ? (MyAccessibilityService) c : MyAccessibilityService.getInstance();
+        this.ctx = c.getApplicationContext();
+        this.wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
         instance = this;
     }
 
@@ -220,60 +273,75 @@ public class OverlayManager {
         MyAccessibilityService svc = MyAccessibilityService.getInstance();
         if (svc != null) {
             try {
-                return !svc.shouldHideDecryptionOverlays();
+                if (svc.shouldHideDecryptionOverlays()) return false;
+                AccessibilityNodeInfo root = svc.getRootInActiveWindow();
+                boolean isChat = svc.isConversationScreen(root);
+                if (root != null) root.recycle();
+                return isChat && svc.isReallyInWhatsApp();
             } catch (Exception e) {
                 Log.w(TAG, "Error checking shouldShowOverlays", e);
                 return false;
             }
         }
-        return true;
+        return false;
     }
 
-    public void showDecryptedOverlay(@NonNull String txt,
-                                     @NonNull AccessibilityNodeInfo bubbleNode,
-                                     @NonNull Rect bounds,
+    public void showDecryptedOverlay(String txt,
+                                     AccessibilityNodeInfo bubbleNode,
+                                     Rect bounds,
                                      boolean outgoing,
-                                     @NonNull String id) {
-        Log.d("LT_BUBBLE", "showDecryptedOverlay called: id=" + id + ", text=" + txt.substring(0, Math.min(50, txt.length())) + "..., outgoing=" + outgoing);
+                                     String id) {
+        Log.d("LT_BUBBLE", "showDecryptedOverlay called: id=" + id + ", text=" + (txt == null ? "null" : txt.substring(0, Math.min(50, txt.length()))) + "..., outgoing=" + outgoing);
 
-        // בדיקות יציבות מוקדמות
-        if (!MyAccessibilityService.getInstance().isReallyInWhatsApp()) {
+        MyAccessibilityService svc = MyAccessibilityService.getInstance();
+        if (svc == null || !svc.isReallyInWhatsApp()) {
             Log.d("LT_BUBBLE", "Not in WhatsApp, hiding bubbles");
             hideBubblesOnly();
             return;
         }
-
-        if (bounds.width() <= 0 || bounds.height() <= 0) {
-            Log.w("LT_BUBBLE", "Invalid bounds for text bubble: " + bounds.toShortString());
+        if (bounds == null || bounds.width() <= 0 || bounds.height() <= 0) {
+            Log.w("LT_BUBBLE", "Invalid bounds for text bubble: " + (bounds == null ? "null" : bounds.toShortString()));
             return;
         }
-
         if (bubbleOverlays.containsKey(id)) {
-            Log.d("LT_BUBBLE", "Text overlay already exists for id=" + id);
-            return;
+            try {
+                View v = bubbleOverlays.get(id);
+                if (v != null) {
+                    WindowManager.LayoutParams lp = translucentLp(bounds.width(), bounds.height(), bounds.left, bounds.top);
+                    wm.updateViewLayout(v, lp);
+                    overlayBounds.put(id, new Rect(bounds)); // שומר מיקום נוכחי
+                }
+            } catch (Exception ex) {
+                Log.w(TAG, "showDecryptedOverlay: update existing failed id=" + id, ex);
+            }
+            return; // לא יוצרים חדש
         }
 
         try {
-            int padPx = dp(4);
+            int padPx = dp(2); // פחות padding כדי להצמד לבועה
 
             FrameLayout frame = new FrameLayout(ctx);
             frame.setBackgroundColor(0x00000000);
+            frame.setTag("decrypted_overlay_" + id);
 
             ScrollView scrollView = new ScrollView(ctx);
             scrollView.setFillViewport(true);
 
             TextView tv = new TextView(ctx);
-            tv.setText(txt);
+            // במקום setText רגיל – ניישם קישורים לחיצים + pass-through
+            applyClickableLinks(tv, txt);
+
             tv.setTextIsSelectable(true);
             tv.setTextSize(16f);
             tv.setTextColor(0xFF202020);
             tv.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
             tv.setPadding(dp(12), dp(8), dp(12), dp(8));
 
-            if (outgoing) {
-                tv.setBackgroundResource(R.drawable.bg_bubble_out);
-            } else {
-                tv.setBackgroundResource(R.drawable.bg_bubble_in);
+            int bgRes = outgoing ? R.drawable.bg_bubble_out : R.drawable.bg_bubble_in;
+            tv.setBackgroundResource(bgRes);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                tv.setTextDirection(View.TEXT_DIRECTION_LOCALE);
             }
 
             scrollView.addView(tv, new ScrollView.LayoutParams(
@@ -308,39 +376,69 @@ public class OverlayManager {
         }
     }
 
-    public void showDecryptedImageOverlay(@NonNull Bitmap src, @NonNull Rect r, @NonNull String imageUniqueId) {
+    public void cleanupImageOverlays() {
+        List<String> toRemove = new ArrayList<>();
+        for (String id : imageOverlayIds) {
+            toRemove.add(id);
+        }
+        for (String id : toRemove) {
+            removeOverlay(id);
+        }
+        Log.d(TAG, "cleanupImageOverlays: Removed " + toRemove.size() + " image overlays");
+    }
+
+    private void removeOverlay(String id) {
+        View v = bubbleOverlays.remove(id);
+        if (v != null) {
+            try {
+                if (v.getParent() != null) {
+                    wm.removeView(v);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error removing overlay: " + id, e);
+            }
+        }
+        imageOverlayIds.remove(id);
+        overlayBounds.remove(id);
+    }
+
+    public void showDecryptedImageOverlay(Bitmap src, Rect r, String imageUniqueId) {
         Log.d("LT_IMG_DECRYPT", "showDecryptedImageOverlay called: id=" + imageUniqueId + ", rect=" + r.toShortString());
 
-        // בדיקות יציבות
-        if (!MyAccessibilityService.getInstance().isReallyInWhatsApp()) {
+        MyAccessibilityService svc = MyAccessibilityService.getInstance();
+        if (svc == null || !svc.isReallyInWhatsApp()) {
             Log.d("LT_IMG_DECRYPT", "Not in WhatsApp, skipping overlay");
             hideBubblesOnly();
             return;
         }
-
-        if (r.width() <= 0 || r.height() <= 0) {
-            Log.e("LT_IMG_DECRYPT", "Invalid bounds for image overlay: " + r.toShortString());
+        if (r == null || r.width() <= 0 || r.height() <= 0) {
+            Log.e("LT_IMG_DECRYPT", "Invalid bounds for image overlay: " + (r == null ? "null" : r.toShortString()));
             return;
         }
 
-        // בדיקה כפולה למניעת שכפולים
         if (hasImageOverlay(imageUniqueId)) {
-            Log.d("LT_IMG_DECRYPT", "Image overlay already exists for id=" + imageUniqueId);
+            try {
+                View v = bubbleOverlays.get(imageUniqueId);
+                if (v != null) {
+                    WindowManager.LayoutParams lp = translucentLp(r.width(), r.height(), r.left, r.top);
+                    wm.updateViewLayout(v, lp);
+                    overlayBounds.put(imageUniqueId, new Rect(r));
+                }
+            } catch (Exception ex) {
+                Log.w(TAG, "showDecryptedImageOverlay: update existing failed id=" + imageUniqueId, ex);
+            }
             return;
         }
 
         try {
-            // רישום המפתח
             imageOverlayIds.add(imageUniqueId);
 
-            // יצירת תמונה מוקטנת/מותאמת
             Bitmap scaledBitmap = createScaledBitmap(src, r);
 
             ImageView iv = new ImageView(ctx);
             iv.setImageBitmap(scaledBitmap);
             iv.setScaleType(ImageView.ScaleType.MATRIX);
 
-            // יצירת matrix למיקום מדויק
             Matrix matrix = new Matrix();
             matrix.setScale(
                     (float) r.width() / scaledBitmap.getWidth(),
@@ -349,7 +447,6 @@ public class OverlayManager {
             iv.setImageMatrix(matrix);
             iv.setAdjustViewBounds(false);
 
-            // פתיחה במסך מלא
             iv.setOnClickListener(v -> showFullScreenImageOverlay(src));
 
             addOverlay(iv, translucentLp(r.width(), r.height(), r.left, r.top), imageUniqueId);
@@ -366,23 +463,19 @@ public class OverlayManager {
 
     private Bitmap createScaledBitmap(Bitmap src, Rect targetRect) {
         try {
-            // חישוב יחס התמונה והמסגרת
             float srcRatio = (float) src.getWidth() / src.getHeight();
             float targetRatio = (float) targetRect.width() / targetRect.height();
 
             int newWidth, newHeight;
 
             if (srcRatio > targetRatio) {
-                // התמונה רחבה יותר - התאם לפי רוחב
                 newWidth = targetRect.width();
                 newHeight = Math.round(targetRect.width() / srcRatio);
             } else {
-                // התמונה גבוהה יותר - התאם לפי גובה
                 newHeight = targetRect.height();
                 newWidth = Math.round(targetRect.height() * srcRatio);
             }
 
-            // ודא שהגדלים חיוביים ולא גדולים מדי
             newWidth = Math.max(1, Math.min(newWidth, targetRect.width()));
             newHeight = Math.max(1, Math.min(newHeight, targetRect.height()));
 
@@ -394,7 +487,7 @@ public class OverlayManager {
         }
     }
 
-    public void showFullScreenImageOverlay(@NonNull Bitmap bmp) {
+    public void showFullScreenImageOverlay(Bitmap bmp) {
         hideFullScreenImage();
 
         try {
@@ -450,6 +543,40 @@ public class OverlayManager {
         }
     }
 
+    // עדכון גבולות לאוברליי תמונה קיים
+    public void updateImageOverlayBounds(String id, Rect b) {
+        if (id == null || b == null) return;
+
+        View v = bubbleOverlays.get(id);
+        if (v == null) return;
+
+        try {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) v.getLayoutParams();
+            lp.width  = Math.max(1, b.width());
+            lp.height = Math.max(1, b.height());
+            lp.x = b.left;
+            lp.y = b.top;
+
+            wm.updateViewLayout(v, lp);
+            overlayBounds.put(id, new Rect(b));
+        } catch (Exception e) {
+            Log.w(TAG, "updateImageOverlayBounds failed for id=" + id + " bounds=" + b, e);
+        }
+    }
+
+    // השאר רק אוברלייז של תמונות שהמפתחות שלהן כרגע על המסך
+    public void removeImageOverlaysExcept(Set<String> keep) {
+        List<String> toRemove = new ArrayList<>();
+        for (String id : imageOverlayIds) {
+            if (!keep.contains(id)) {
+                toRemove.add(id);
+            }
+        }
+        for (String id : toRemove) {
+            removeOverlay(id);
+        }
+    }
+
     public void cleanupBubblesExcept(Set<String> keep) {
         List<String> toRemove = new ArrayList<>();
 
@@ -463,7 +590,6 @@ public class OverlayManager {
             removeOverlay(id);
         }
 
-        // ניקוי רשימות המעקב
         imageOverlayIds.retainAll(keep);
         overlayBounds.keySet().retainAll(keep);
 
@@ -475,33 +601,40 @@ public class OverlayManager {
         for (String id : allIds) {
             removeOverlay(id);
         }
+        for (View v : bubbleOverlays.values()) {
+            try {
+                if (v.getParent() != null) {
+                    wm.removeViewImmediate(v);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error force-removing leftover overlay", e);
+            }
+        }
+        bubbleOverlays.clear();
 
         imageOverlayIds.clear();
         overlayBounds.clear();
-        Log.d(TAG, "All bubbles cleaned up");
-    }
 
-    private void removeOverlay(String id) {
-        View v = bubbleOverlays.remove(id);
-        if (v != null) {
-            try {
-                wm.removeView(v);
-                Log.d(TAG, "Overlay removed: " + id);
-            } catch (Exception e) {
-                Log.w(TAG, "Error removing overlay: " + id, e);
-            }
-        }
-
-        imageOverlayIds.remove(id);
-        overlayBounds.remove(id);
+        Log.d(TAG, "All bubbles cleaned up (strong removal)");
     }
 
     public void clearDecryptOverlays() {
         cleanupBubblesExcept(new HashSet<>());
     }
 
-    public static String bubbleId(String txt, Rect b, boolean out) {
-        return (txt + "|" + b.toShortString() + "|" + out).hashCode() + "";
+    // NEW: עדכון bounds לבועה קיימת
+    public void updateOverlayBounds(String id, Rect newBounds) {
+        View v = bubbleOverlays.get(id);
+        if (v == null || newBounds == null) return;
+
+        try {
+            WindowManager.LayoutParams lp = translucentLp(newBounds.width(), newBounds.height(),
+                    newBounds.left, newBounds.top);
+            wm.updateViewLayout(v, lp);
+            overlayBounds.put(id, new Rect(newBounds));
+        } catch (Exception e) {
+            Log.w(TAG, "updateOverlayBounds failed for id=" + id + " bounds=" + newBounds, e);
+        }
     }
 
     private WindowManager.LayoutParams translucentLp(int w, int h, int x, int y) {
@@ -598,6 +731,89 @@ public class OverlayManager {
 
         } finally {
             isUpdatingVisibility = false;
+        }
+    }
+
+    /* =========================
+       ==  קישורים & pass-through ==
+       ========================= */
+
+    /** הופך קישורים בטקסט ללחיצים ומטפל במגע:
+     *  - לחיצה על קישור: ACTION_VIEW
+     *  - לחיצה במקום שאינו קישור: שולח Gesture “קליק” מתחת לאוברליי (pass-through)
+     */
+    private void applyClickableLinks(TextView tv, String text) {
+        if (text == null) text = "";
+        SpannableString sp = new SpannableString(text);
+
+        // קישורי WEB
+        java.util.regex.Matcher m = Patterns.WEB_URL.matcher(text);
+        while (m.find()) {
+            final String raw = text.substring(m.start(), m.end());
+            final String url = normalizeUrl(raw);
+            sp.setSpan(new ClickableSpan() {
+                @Override public void onClick(View widget) { openUrl(url); }
+            }, m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+
+        tv.setText(sp);
+        tv.setMovementMethod(LinkMovementMethod.getInstance());
+        tv.setLinksClickable(true);
+        tv.setHighlightColor(0x00000000);
+        tv.setClickable(true);
+        tv.setLongClickable(true);
+
+        tv.setOnTouchListener((v, ev) -> handleTouchForPassThrough((TextView) v, ev));
+    }
+
+    private boolean handleTouchForPassThrough(TextView tv, MotionEvent ev) {
+        CharSequence cs = tv.getText();
+        if (!(cs instanceof Spanned)) return false;
+        Spanned sp = (Spanned) cs;
+
+        // קודם ניתן ל-LinkMovementMethod הזדמנות (לינקים/בחירת טקסט)
+        boolean handledByMovement = LinkMovementMethod.getInstance()
+                .onTouchEvent(tv, (Spannable) sp, ev);
+        if (handledByMovement) return true;
+
+        // אם זו הרמה (UP) ולא הופעל לינק – נעביר קליק “למטה”
+        if (ev.getAction() == MotionEvent.ACTION_UP && service != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            int[] loc = new int[2];
+            tv.getLocationOnScreen(loc);
+            float rx = loc[0] + ev.getX();
+            float ry = loc[1] + ev.getY();
+
+            Path p = new Path();
+            p.moveTo(rx, ry);
+            GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(p, 0, 50);
+            GestureDescription gd = new GestureDescription.Builder().addStroke(stroke).build();
+            try {
+                service.dispatchGesture(gd, null, null);
+            } catch (Throwable t) {
+                // לא קריטי – פשוט נתעלם
+            }
+            return true; // צרכנו את האירוע (העברנו למטה)
+        }
+
+        // נחזיר true כדי לא לגרום לגליצ’ים באוברליי
+        return true;
+    }
+
+    private String normalizeUrl(String raw) {
+        String u = raw == null ? "" : raw.trim();
+        if (!u.startsWith("http://") && !u.startsWith("https://")) {
+            u = "http://" + u;
+        }
+        return u;
+    }
+
+    private void openUrl(String url) {
+        try {
+            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+        } catch (Exception e) {
+            Toast.makeText(ctx, "לא ניתן לפתוח קישור", Toast.LENGTH_SHORT).show();
         }
     }
 }

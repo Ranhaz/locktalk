@@ -404,20 +404,39 @@ public class WhatsAppUtils {
         findEncRec(root, out, vis);
         return out;
     }
+    // הוסף ל-WhatsAppUtils
+    public static String getFullTextFromBubble(AccessibilityNodeInfo node) {
+        if (node == null) return "";
+        StringBuilder sb = new StringBuilder();
+        if (node.getText() != null && node.getText().length() > 0) {
+            sb.append(node.getText().toString());
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                String childText = getFullTextFromBubble(child);
+                if (!childText.isEmpty()) {
+                    sb.append(childText);
+                }
+                child.recycle();
+            }
+        }
+        return sb.toString();
+    }
+
     private static void findEncRec(AccessibilityNodeInfo n, List<AccessibilityNodeInfo> out, Set<AccessibilityNodeInfo> vis) {
         if (n == null || vis.contains(n)) return; vis.add(n);
         CharSequence id = n.getViewIdResourceName();
         if (id != null && "com.whatsapp:id/message_text".contentEquals(id)) {
-            CharSequence cs = n.getText();
-            if (cs != null && FAKE_TEXT_PATTERN.matcher(normalize(cs.toString())).matches()) {
+            String fullText = getFullTextFromBubble(n);
+            if (fullText != null && FAKE_TEXT_PATTERN.matcher(normalize(fullText)).matches()) {
                 out.add(n);
-                Log.d(TAG, "Encrypted text bubble: " + cs);
+                Log.d(TAG, "Encrypted text bubble (fullText): " + fullText);
                 return;
             }
         }
         for (int i = 0; i < n.getChildCount(); i++) findEncRec(n.getChild(i), out, vis);
     }
-
 
     private static void findLabelsRec(AccessibilityNodeInfo n, List<Pair<String, Rect>> out, Pattern imgPattern) {
         if (n == null) return;

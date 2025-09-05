@@ -2,5 +2,6 @@
     <cache-path name="images" path="images/"/>
     <cache-path name="cache" path="."/>
     <files-path name="files" path="."/>
+    <files-path name="logs" path="logs/"/>
     <external-path name="external" path="."/>
 </paths>
